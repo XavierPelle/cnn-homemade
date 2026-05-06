@@ -1,0 +1,1524 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>CNN Pneumonie — Guide interactif</title>
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; overflow: hidden; }
+body { background: #0d1117; color: #e2e8f0; font-family: 'Segoe UI', system-ui, sans-serif; display: flex; flex-direction: column; }
+
+/* ══════════════════════════════════════════
+   GUIDE
+   ══════════════════════════════════════════ */
+#guide { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+
+#guide-bar {
+  flex-shrink: 0; background: #161b22; border-bottom: 1px solid #21262d;
+  padding: 8px 20px; display: flex; align-items: center; justify-content: space-between;
+}
+#guide-bar h1 { font-size: .92rem; font-weight: 700; color: #a78bfa; }
+#step-ctr { font-size: .78rem; color: #6e7681; }
+#btn-enter { background: #7c3aed; color: #fff; border: none; border-radius: 6px; padding: 6px 16px; font-size: .8rem; font-weight: 700; cursor: pointer; }
+
+/* Zone slides — prend tout l'espace restant */
+#slides-area { flex: 1; position: relative; min-height: 0; overflow: hidden; }
+
+/*
+  Chaque slide = grille CSS avec 4 rangées fixes :
+    1. tag         → auto (se réduit au contenu)
+    2. titre       → auto
+    3. canvas      → 1fr (prend TOUT l'espace restant)
+    4. description → auto
+  Plus jamais d'overlap.
+*/
+.slide {
+  display: none;
+  position: absolute; inset: 0;
+  grid-template-rows: auto auto 1fr auto;
+  grid-template-columns: 1fr;
+  row-gap: 10px;
+  padding: 14px 28px 10px;
+}
+.slide.active { display: grid; }
+
+.s-tag  { font-size: .67rem; font-weight: 700; text-transform: uppercase; letter-spacing: .11em; color: #a78bfa; text-align: center; }
+.s-title { font-size: 1.45rem; font-weight: 800; text-align: center; line-height: 1.25; }
+
+/* La cellule canvas prend tout l'espace disponible */
+.s-canvas { position: relative; min-height: 0; }
+/* Le canvas remplit exactement sa cellule */
+.s-canvas canvas { position: absolute; inset: 0; width: 100%; height: 100%; border-radius: 10px; background: #161b22; display: block; }
+
+.s-desc {
+  font-size: .88rem; color: #8b949e; line-height: 1.65;
+  text-align: center; max-width: 860px; margin: 0 auto;
+}
+.s-desc b { color: #c9d1d9; }
+.s-desc ul { display: inline-block; text-align: left; list-style: none; }
+.s-desc ul li { padding: 2px 0; }
+.s-desc ul li::before { content: '→ '; color: #a78bfa; }
+
+/* Barre de navigation en bas */
+#guide-nav {
+  flex-shrink: 0; background: #161b22; border-top: 1px solid #21262d;
+  padding: 9px 20px; display: flex; align-items: center; justify-content: center; gap: 18px;
+}
+.nav-btn { background: #21262d; border: 1px solid #30363d; color: #8b949e; border-radius: 6px; padding: 6px 18px; font-size: .8rem; cursor: pointer; }
+.nav-btn:hover:not(:disabled) { background: #30363d; color: #e2e8f0; }
+.nav-btn:disabled { opacity: .3; cursor: default; }
+.dots { display: flex; gap: 7px; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: #30363d; cursor: pointer; transition: background .2s; }
+.dot.on { background: #a78bfa; }
+
+/* ══════════════════════════════════════════
+   INFERENCE — Redesign
+   ══════════════════════════════════════════ */
+#training { flex: 1; display: none; flex-direction: column; min-height: 0; overflow: hidden; background: #07070f; }
+
+#train-bar {
+  flex-shrink: 0; background: #0c0c1e; border-bottom: 1px solid #16163a;
+  padding: 10px 22px; display: flex; align-items: center; justify-content: space-between;
+}
+#train-bar h1 { font-size: .92rem; font-weight: 700; color: #a78bfa; }
+.hb { padding: 7px 16px; border: none; border-radius: 8px; font-size: .76rem; font-weight: 700; cursor: pointer; transition: all .15s; }
+#btn-back { background: transparent; border: 1px solid #21213f; color: #64748b; }
+#btn-back:hover { background: #131328; color: #a78bfa; border-color: #3730a3; }
+
+/* Barre de statut */
+#infer-status {
+  flex-shrink: 0; background: #090914; border-bottom: 1px solid #0f0f26;
+  padding: 5px 22px; display: flex; align-items: center; gap: 8px; min-height: 26px;
+}
+.status-dot {
+  width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0;
+  background: #21213f; transition: background .3s, box-shadow .3s;
+}
+.status-dot.running { background: #a78bfa; box-shadow: 0 0 8px rgba(167,139,250,.7); animation: dot-pulse 1s ease-in-out infinite; }
+.status-dot.done    { background: #10b981; }
+.status-dot.err     { background: #ef4444; }
+@keyframes dot-pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+#s-msg { font-size: .7rem; color: #3d3d6b; }
+
+/* Grid principal */
+#tgrid {
+  flex: 1; display: grid; grid-template-columns: 265px 1fr;
+  gap: 10px; padding: 10px; overflow: hidden; min-height: 0;
+}
+
+/* ── Sélecteur ── */
+#col-select {
+  display: flex; flex-direction: column;
+  background: #0c0c1e; border: 1px solid #16163a; border-radius: 12px;
+  padding: 12px; gap: 8px; overflow: hidden;
+}
+.panel-header { display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
+.panel-title { font-size: .58rem; font-weight: 700; text-transform: uppercase; letter-spacing: .12em; color: #2d2d5a; }
+#img-count { font-size: .6rem; font-weight: 700; color: #4a3a7a; background: #131328; padding: 2px 8px; border-radius: 8px; border: 1px solid #21213f; }
+
+#img-grid {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px;
+  overflow-y: auto; flex: 1; min-height: 0; align-content: start;
+  scrollbar-width: thin; scrollbar-color: #21213f transparent;
+}
+#img-grid::-webkit-scrollbar { width: 4px; }
+#img-grid::-webkit-scrollbar-thumb { background: #21213f; border-radius: 2px; }
+
+.thumb-item {
+  cursor: pointer; border-radius: 7px; border: 2px solid transparent;
+  transition: all .14s; overflow: hidden; background: #111128;
+}
+.thumb-item:hover { border-color: #3730a3; transform: scale(1.04); }
+.thumb-item.sel { border-color: #f59e0b; box-shadow: 0 0 0 3px rgba(245,158,11,.18), 0 0 14px rgba(245,158,11,.12); }
+.thumb-item img { width: 100%; aspect-ratio: 1; display: block; object-fit: cover; }
+.thumb-lbl { font-size: .5rem; text-align: center; padding: 2px 0; font-weight: 700; letter-spacing: .04em; }
+.thumb-lbl.pn { color: #fca5a5; background: rgba(220,38,38,.2); }
+.thumb-lbl.nm { color: #86efac; background: rgba(22,163,74,.2); }
+
+.sel-btn {
+  width: 100%; padding: 10px;
+  background: linear-gradient(135deg, #7c3aed, #5b21b6);
+  color: #fff; border: none; border-radius: 9px;
+  font-size: .85rem; font-weight: 700; cursor: pointer; flex-shrink: 0; transition: all .15s;
+}
+.sel-btn:hover:not(:disabled) { background: linear-gradient(135deg,#6d28d9,#4c1d95); transform: translateY(-1px); box-shadow: 0 8px 24px rgba(124,58,237,.4); }
+.sel-btn:active:not(:disabled) { transform: translateY(0); box-shadow: none; }
+.sel-btn:disabled { background: #111128; color: #252550; cursor: default; }
+
+/* ── Pipeline — 2 rangées ── */
+#pipeline { display: grid; grid-template-rows: 1fr 1fr; gap: 8px; min-height: 0; overflow: hidden; }
+
+.pipe-row { display: flex; flex-direction: row; align-items: stretch; overflow: hidden; min-height: 0; }
+
+.stage {
+  flex: 1; display: flex; flex-direction: column; align-items: center;
+  background: #0c0c1e; border: 1px solid #16163a; border-radius: 12px;
+  padding: 10px 8px 8px; overflow: hidden; min-width: 0;
+  transition: border-color .3s, box-shadow .3s;
+}
+.stage-input  { flex: .72; }
+.stage-result { flex: .75; }
+#stage-dense  { flex: 2; }
+.stage.lit { border-color: #2d2a5e; box-shadow: 0 0 0 1px #2d2a5e, 0 0 20px rgba(139,92,246,.15); }
+
+.stage-badge {
+  font-size: .6rem; font-weight: 700; text-transform: uppercase; letter-spacing: .08em;
+  color: #8b5cf6; background: #100d28; border: 1px solid #262058;
+  padding: 4px 12px; border-radius: 16px; flex-shrink: 0; white-space: nowrap;
+}
+.stage-content {
+  flex: 1; display: flex; align-items: center; justify-content: center;
+  width: 100%; min-height: 0; overflow: hidden; margin: 7px 0 3px;
+}
+.stage-desc { font-size: .56rem; color: #2d2d52; text-align: center; line-height: 1.55; flex-shrink: 0; padding: 0 2px; }
+.stage-desc b { color: #3d3d6b; }
+
+.pipe-arrow { display: flex; flex-direction: column; align-items: center; justify-content: center; flex-shrink: 0; width: 26px; gap: 3px; }
+.pipe-arrow-line { font-size: .9rem; color: #1a1a38; }
+.pipe-arrow-label { font-size: .43rem; color: #1a1a38; text-align: center; line-height: 1.4; }
+
+/* Entrée */
+.stage-input .stage-content { position: relative; padding: 0; }
+#res-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; image-rendering: pixelated; border-radius: 6px; display: block; }
+
+/* Feature maps */
+#fm1, #fm2 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 3px; width: 100%; }
+#fm1 img, #fm2 img {
+  width: 100%; aspect-ratio: 1; image-rendering: pixelated; border-radius: 3px;
+  background: #07070f; border: 1px solid #111128;
+  cursor: pointer; transition: border-color .12s, transform .1s;
+}
+#fm1 img:hover, #fm2 img:hover { border-color: #8b5cf6; transform: scale(1.06); }
+.fm-legend { font-size: .48rem; color: #3d3d6b; text-align: center; margin-top: 3px; flex-shrink: 0; }
+.fm-hint { font-size: .46rem; color: #2d2d5a; text-align: center; margin-top: 2px; flex-shrink: 0; }
+.dim-badge { font-size: .52rem; font-weight: 700; color: #4a3a7a; background: #0e0e1c; border: 1px solid #16163a; padding: 2px 7px; border-radius: 5px; flex-shrink: 0; margin-top: 3px; }
+
+/* ── Modal feature map ── */
+#fm-modal {
+  position: fixed; inset: 0; background: rgba(0,0,0,.88);
+  display: none; align-items: center; justify-content: center;
+  z-index: 1000; backdrop-filter: blur(6px);
+}
+.fm-modal-card {
+  background: #0c0c1e; border: 1px solid #2d2a5e; border-radius: 14px;
+  padding: 20px 22px; max-width: 780px; width: 92%;
+  box-shadow: 0 0 60px rgba(139,92,246,.2);
+}
+.fm-modal-hd { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+#fm-modal-title { font-size: .9rem; font-weight: 700; color: #a78bfa; }
+#fm-modal-close {
+  background: #131328; border: 1px solid #21213f; color: #64748b;
+  border-radius: 6px; width: 28px; height: 28px; cursor: pointer;
+  font-size: 1.1rem; line-height: 1; transition: all .15s;
+}
+#fm-modal-close:hover { background: #21213f; color: #e2e8f0; }
+.fm-modal-cols { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+.fm-modal-col { display: flex; flex-direction: column; gap: 6px; }
+.fm-modal-lbl { font-size: .6rem; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: #3d3d6b; text-align: center; }
+.fm-modal-col canvas { width: 100% !important; aspect-ratio: 1; border-radius: 8px; border: 1px solid #16163a; display: block; image-rendering: pixelated; }
+#fm-modal-desc { margin-top: 14px; font-size: .72rem; color: #64748b; text-align: center; line-height: 1.65; padding: 10px 14px; background: #07070f; border-radius: 8px; border: 1px solid #111128; }
+.fm-cmap-bar { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+.fm-cmap-gradient { flex: 1; height: 8px; border-radius: 4px; background: linear-gradient(to right, #000004, #56106e, #bb3754, #f98c09, #fcffa4); }
+.fm-cmap-label { font-size: .55rem; color: #2d2d5a; white-space: nowrap; }
+
+/* Dense — histogramme */
+#stage-dense .stage-content { align-items: stretch; padding: 0; }
+#dense-hist-wrap { position: relative; width: 100%; height: 100%; }
+#dense-count { font-size: .6rem; font-weight: 600; color: #4a3a7a; text-align: center; flex-shrink: 0; margin-top: 2px; }
+
+/* Preprocessing chain */
+.preproc-chain { display: flex; align-items: center; gap: 3px; flex-shrink: 0; justify-content: center; margin-bottom: 3px; flex-wrap: wrap; }
+.pp-chip { font-size: .52rem; font-weight: 700; color: #2d2d5a; background: #0e0e1c; border: 1px solid #16163a; padding: 2px 6px; border-radius: 5px; }
+.pp-chip.hi { color: #8b5cf6; border-color: #262058; background: #100d28; }
+.pp-sep { font-size: .55rem; color: #1a1a38; }
+
+/* Résultat — éléments directs du stage (flex col) */
+.res-spacer { flex: 1; }
+#res-verdict { font-size: 1.45rem; font-weight: 900; text-align: center; color: #374151; flex-shrink: 0; letter-spacing: .06em; }
+#res-pct { font-size: 2.8rem; font-weight: 900; text-align: center; color: #e2e8f0; line-height: 1.05; flex-shrink: 0; }
+#res-label { font-size: .55rem; color: #374151; text-align: center; flex-shrink: 0; margin-bottom: 8px; }
+#res-bar-bg { width: 100%; height: 7px; background: #07070f; border-radius: 4px; overflow: hidden; border: 1px solid #16163a; flex-shrink: 0; }
+#res-bar { height: 100%; width: 0%; border-radius: 4px; transition: width .8s cubic-bezier(.4,0,.2,1), background .4s; }
+#res-score { display: flex; justify-content: space-between; font-size: .52rem; color: #252550; width: 100%; flex-shrink: 0; margin-top: 3px; }
+#res-truth { width: 100%; background: #07070f; border: 1px solid #16163a; border-radius: 8px; padding: 7px 12px; margin-top: 10px; flex-shrink: 0; }
+.rt-row { display: flex; justify-content: space-between; align-items: center; padding: 4px 0; }
+.rt-row + .rt-row { border-top: 1px solid #111128; }
+.rt-k { font-size: .6rem; color: #374151; }
+.rt-v { font-size: .78rem; font-weight: 700; }
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════ GUIDE ═══════════════════════════ -->
+<div id="guide">
+  <div id="guide-bar">
+    <h1>CNN Pneumonie — Guide interactif</h1>
+    <span id="step-ctr">Étape 1 / 7</span>
+    <button id="btn-enter">Tester le réseau ▶</button>
+  </div>
+
+  <div id="slides-area">
+
+    <!-- S1 : Image = matrice -->
+    <div class="slide active" id="s1">
+      <div class="s-tag">Étape 1 — Les données d'entrée</div>
+      <div class="s-title">Une radiographie est une matrice de valeurs numériques</div>
+      <div class="s-canvas"><canvas id="cv1"></canvas></div>
+      <div class="s-desc">
+        Chaque pixel est un entier entre <b>0</b> (noir) et <b>255</b> (blanc).
+        Cette image réelle de 1 812 × 1 325 pixels contient <b>2,4 millions de valeurs</b>.
+        Le réseau ne traite pas une image visuelle — il reçoit cette matrice de nombres.
+      </div>
+    </div>
+
+    <!-- S2 : Prétraitement -->
+    <div class="slide" id="s2">
+      <div class="s-tag">Étape 2 — Prétraitement (Preprocessing)</div>
+      <div class="s-title">Trois transformations avant d'entrer dans le réseau</div>
+      <div class="s-canvas"><canvas id="cv2"></canvas></div>
+      <div class="s-desc"><ul>
+        <li><b>Niveaux de gris</b> — l'information diagnostique est dans les contrastes, pas la couleur. 3 canaux → 1 canal.</li>
+        <li><b>Redimensionnement 64×64</b> — le réseau exige une entrée de taille fixe.</li>
+        <li><b>Normalisation ÷ 255</b> — les valeurs passent de [0, 255] à [0.0, 1.0], ce qui stabilise les gradients.</li>
+      </ul></div>
+    </div>
+
+    <!-- S3 : Convolution -->
+    <div class="slide" id="s3">
+      <div class="s-tag">Étape 3 — La Convolution</div>
+      <div class="s-title">Un filtre parcourt l'image et mesure la présence d'un pattern</div>
+      <div class="s-canvas"><canvas id="cv3"></canvas></div>
+      <div class="s-desc">
+        Un filtre 3×3 (9 poids appris) se déplace pixel par pixel sur la radiographie.
+        À chaque position, il calcule un <b>produit scalaire</b> entre ses poids et le patch correspondant.
+        Le résultat forme une <b>feature map</b> : une carte de présence du pattern détecté.
+      </div>
+    </div>
+
+    <!-- S4 : ReLU -->
+    <div class="slide" id="s4">
+      <div class="s-tag">Étape 4 — L'Activation ReLU</div>
+      <div class="s-title">Seules les activations positives sont conservées</div>
+      <div class="s-canvas"><canvas id="cv4"></canvas></div>
+      <div class="s-desc">
+        La fonction <b>ReLU : f(x) = max(0, x)</b> est appliquée après chaque convolution.
+        Les valeurs négatives sont annulées. Sans cette non-linéarité,
+        empiler des couches serait mathématiquement équivalent à une seule transformation linéaire.
+      </div>
+    </div>
+
+    <!-- S5 : Pooling -->
+    <div class="slide" id="s5">
+      <div class="s-tag">Étape 5 — Le Max Pooling</div>
+      <div class="s-title">Réduire la résolution en conservant les features dominantes</div>
+      <div class="s-canvas"><canvas id="cv5"></canvas></div>
+      <div class="s-desc">
+        Le Max Pooling divise la feature map en régions 2×2 et ne retient que la <b>valeur maximale</b>.
+        La résolution est divisée par deux dans chaque dimension.
+        Cela réduit le coût de calcul et confère une <b>invariance partielle aux translations</b>.
+      </div>
+    </div>
+
+    <!-- S6 : Dense -->
+    <div class="slide" id="s6">
+      <div class="s-tag">Étape 6 — La Couche Dense (Fully Connected)</div>
+      <div class="s-title">Chaque feature contribue à la décision, pondérée par son importance</div>
+      <div class="s-canvas"><canvas id="cv6"></canvas></div>
+      <div class="s-desc">
+        La couche dense connecte <b>chaque entrée à chaque neurone</b> : y = Σ(wᵢ × xᵢ) + b.
+        Les poids <b>w</b> encodent l'importance de chaque feature.
+        <b>Dense 1</b> (3 136 → 128) applique <b>ReLU</b> — seules les combinaisons positives survivent.
+        <b>Dense 2</b> (128 → 1) applique <b>Sigmoid</b> — convertit le score brut en probabilité [0, 1].
+      </div>
+    </div>
+
+    <!-- S7 : Apprentissage -->
+    <div class="slide" id="s7">
+      <div class="s-tag">Étape 7 — La Rétropropagation (Backpropagation)</div>
+      <div class="s-title">L'apprentissage par correction itérative des erreurs</div>
+      <div class="s-canvas"><canvas id="cv7"></canvas></div>
+      <div class="s-desc">
+        À chaque batch : <b>(1)</b> prédire, <b>(2)</b> mesurer l'erreur (Binary Cross-Entropy loss),
+        <b>(3)</b> propager le gradient en sens inverse couche par couche,
+        <b>(4)</b> ajuster chaque poids avec l'optimizer (SGD + Momentum).
+        Ce cycle répété des milliers de fois fait <b>converger la loss vers un minimum</b>.
+      </div>
+    </div>
+
+  </div><!-- /slides-area -->
+
+  <div id="guide-nav">
+    <button class="nav-btn" id="prev-btn" disabled>← Précédent</button>
+    <div class="dots" id="dots-row"></div>
+    <button class="nav-btn" id="next-btn">Suivant →</button>
+  </div>
+</div>
+
+<!-- ═══════════════════ INFERENCE ════════════════════════ -->
+<div id="training">
+  <div id="train-bar">
+    <h1>CNN Pneumonie — Tester le réseau</h1>
+    <button class="hb" id="btn-back">← Guide</button>
+  </div>
+
+  <div id="infer-status">
+    <div class="status-dot" id="status-dot"></div>
+    <span id="s-msg">Sélectionnez une radio et cliquez Analyser</span>
+  </div>
+
+  <div id="tgrid">
+
+    <!-- Sélecteur -->
+    <div id="col-select">
+      <div class="panel-header">
+        <div class="panel-title">Radios du test set</div>
+        <span id="img-count"></span>
+      </div>
+      <div id="img-grid"></div>
+      <button class="sel-btn" id="btn-run" disabled>Analyser →</button>
+    </div>
+
+    <!-- Pipeline en 2 rangées -->
+    <div id="pipeline">
+
+      <!-- Rangée 1 : extraction de features -->
+      <div class="pipe-row">
+
+        <div class="stage stage-input" id="stage-input">
+          <div class="stage-badge">Entrée — Preprocessing</div>
+          <div class="stage-content"><img id="res-img" src="" alt=""></div>
+          <div class="preproc-chain">
+            <span class="pp-chip">RGB</span><span class="pp-sep">→</span>
+            <span class="pp-chip hi">Gris</span><span class="pp-sep">→</span>
+            <span class="pp-chip hi">64×64</span><span class="pp-sep">→</span>
+            <span class="pp-chip hi">÷ 255</span>
+          </div>
+          <div class="stage-desc"><b>1 canal · 64×64 · [0.0, 1.0]</b></div>
+        </div>
+
+        <div class="pipe-arrow">
+          <div class="pipe-arrow-line">→</div>
+          <div class="pipe-arrow-label">8 filtres<br>3×3<br>+ ReLU</div>
+        </div>
+
+        <div class="stage" id="stage-conv1">
+          <div class="stage-badge">Conv 1 — 8 filtres 3×3</div>
+          <div class="stage-content">
+            <div id="fm1"><img alt=""><img alt=""><img alt=""><img alt=""><img alt=""><img alt=""><img alt=""><img alt=""></div>
+          </div>
+          <div class="fm-legend">Jaune = pattern fortement détecté &nbsp;·&nbsp; Noir = ReLU a tout bloqué (pattern absent sur cette radio)</div>
+          <div class="fm-legend" style="margin-top:2px">8 filtres aux poids différents → chacun cherche un pattern distinct (bords, contrastes, textures…)</div>
+          <div class="dim-badge" style="text-align:center">62×62×8 → Pool → 31×31×8</div>
+          <div class="fm-hint">↑ Cliquer pour superposer à la radio</div>
+        </div>
+
+        <div class="pipe-arrow">
+          <div class="pipe-arrow-line">→</div>
+          <div class="pipe-arrow-label">Pool 2×2<br>16 filtres<br>+ ReLU</div>
+        </div>
+
+        <div class="stage" id="stage-conv2">
+          <div class="stage-badge">Conv 2 — 16 filtres 3×3</div>
+          <div class="stage-content">
+            <div id="fm2"><img alt=""><img alt=""><img alt=""><img alt=""><img alt=""><img alt=""><img alt=""><img alt=""></div>
+          </div>
+          <div class="fm-legend">16 filtres 3×3×8 combinant les sorties de Conv1 → détectent des structures complexes (opacités, infiltrats)</div>
+          <div class="fm-legend" style="margin-top:2px">Jaune = structure fortement détectée &nbsp;·&nbsp; Noir = pattern combiné absent ici</div>
+          <div class="dim-badge" style="text-align:center">29×29×16 → Pool → 14×14×16 → Flatten → 3136</div>
+          <div class="fm-hint">↑ Cliquer pour superposer à la radio</div>
+        </div>
+
+      </div><!-- /pipe-row 1 -->
+
+      <!-- Rangée 2 : interprétation -->
+      <div class="pipe-row">
+
+        <div class="stage" id="stage-dense">
+          <div class="stage-badge">Dense — Contributions au diagnostic</div>
+          <div class="stage-content">
+            <div id="dense-hist-wrap"><canvas id="dense-hist"></canvas></div>
+          </div>
+          <div id="dense-count">Top 16 neurones par contribution absolue</div>
+        </div>
+
+        <div class="pipe-arrow">
+          <div class="pipe-arrow-line">→</div>
+          <div class="pipe-arrow-label">Dense2<br>Sigmoid</div>
+        </div>
+
+        <div class="stage stage-result" id="stage-result">
+          <div class="stage-badge">Diagnostic</div>
+          <div class="res-spacer"></div>
+          <div id="res-verdict">—</div>
+          <div id="res-pct">—</div>
+          <div id="res-bar-bg" style="margin-top:6px"><div id="res-bar"></div></div>
+          <div id="res-score"><span>NORMAL</span><span>PNEUMONIE</span></div>
+          <div id="res-truth">
+            <div class="rt-row"><span class="rt-k">Logit</span><span class="rt-v" style="color:#8b5cf6" id="logit-val">—</span></div>
+            <div class="rt-row"><span class="rt-k">Vrai label</span><span class="rt-v" id="true-label-box">—</span></div>
+            <div class="rt-row"><span class="rt-k">Verdict</span><span class="rt-v" id="verdict-box">—</span></div>
+          </div>
+          <div class="res-spacer"></div>
+        </div>
+
+      </div><!-- /pipe-row 2 -->
+
+    </div><!-- /pipeline -->
+
+  </div><!-- /tgrid -->
+</div>
+
+<!-- ═══════════════════ MODAL FEATURE MAP ════════════════ -->
+<div id="fm-modal">
+  <div class="fm-modal-card">
+    <div class="fm-modal-hd">
+      <span id="fm-modal-title">Filtre</span>
+      <button id="fm-modal-close">×</button>
+    </div>
+    <div class="fm-modal-cols">
+      <div class="fm-modal-col">
+        <div class="fm-modal-lbl">Radio d'entrée</div>
+        <canvas id="fm-cv-input"></canvas>
+      </div>
+      <div class="fm-modal-col">
+        <div class="fm-modal-lbl">Feature map</div>
+        <canvas id="fm-cv-map"></canvas>
+      </div>
+      <div class="fm-modal-col">
+        <div class="fm-modal-lbl">Superposition</div>
+        <canvas id="fm-cv-overlay"></canvas>
+      </div>
+    </div>
+    <div id="fm-modal-desc">—</div>
+    <div class="fm-cmap-bar">
+      <span class="fm-cmap-label">Inactif</span>
+      <div class="fm-cmap-gradient"></div>
+      <span class="fm-cmap-label">Activation forte</span>
+    </div>
+  </div>
+</div>
+
+<script>
+// ════════════════════════════════════════════════════════
+//  GUIDE — navigation
+// ════════════════════════════════════════════════════════
+const N = 7;
+let cur = 0;
+const anims = {};
+
+// Vraies radios (chargées au démarrage)
+const xrayNormal   = new Image();
+const xrayPneumo   = new Image();
+xrayNormal.src   = '/xray/normal';
+xrayPneumo.src   = '/xray/pneumonia';
+
+// Dots
+const dotsRow = document.getElementById('dots-row');
+for (let i = 0; i < N; i++) {
+  const d = document.createElement('div');
+  d.className = 'dot' + (i === 0 ? ' on' : '');
+  d.addEventListener('click', () => goTo(i));
+  dotsRow.appendChild(d);
+}
+
+function goTo(idx) {
+  if (anims[cur]) { cancelAnimationFrame(anims[cur]); delete anims[cur]; }
+  document.getElementById('s'+(cur+1)).classList.remove('active');
+  dotsRow.children[cur].classList.remove('on');
+  cur = idx;
+  document.getElementById('s'+(cur+1)).classList.add('active');
+  dotsRow.children[cur].classList.add('on');
+  document.getElementById('step-ctr').textContent = `Étape ${cur+1} / ${N}`;
+  document.getElementById('prev-btn').disabled = cur === 0;
+  document.getElementById('next-btn').textContent = cur === N-1 ? 'Terminé ✓' : 'Suivant →';
+  document.getElementById('next-btn').disabled = false;
+  // Lancer après un tick pour que le canvas soit visible et mesurable
+  setTimeout(() => startAnim(cur), 30);
+}
+
+document.getElementById('prev-btn').addEventListener('click', () => cur > 0 && goTo(cur-1));
+document.getElementById('next-btn').addEventListener('click', () => cur < N-1 && goTo(cur+1));
+document.getElementById('btn-enter').addEventListener('click', () => {
+  document.getElementById('guide').style.display    = 'none';
+  document.getElementById('training').style.display = 'flex';
+});
+document.getElementById('btn-back').addEventListener('click', () => {
+  document.getElementById('training').style.display = 'none';
+  document.getElementById('guide').style.display    = 'flex';
+  setTimeout(() => startAnim(cur), 30);
+});
+
+// ── Canvas helper ───────────────────────────────────────
+// Mesure le canvas via getBoundingClientRect (fonctionne même avec position:absolute)
+// Ne réinitialise que si la taille a vraiment changé (évite le reset constant)
+function gc(id) {
+  const c = document.getElementById(id);
+  const r = c.getBoundingClientRect();
+  const w = Math.round(r.width), h = Math.round(r.height);
+  if (w > 10 && h > 10 && (c.width !== w || c.height !== h)) {
+    c.width = w; c.height = h;
+  }
+  return c;
+}
+
+// ── Helpers dessin ──────────────────────────────────────
+function bg(ctx, W, H, col='#161b22') { ctx.fillStyle = col; ctx.fillRect(0, 0, W, H); }
+
+function t(ctx, str, x, y, sz, col, align='center', weight='normal') {
+  ctx.save();
+  ctx.font = `${weight} ${sz}px 'Segoe UI',sans-serif`;
+  ctx.fillStyle = col; ctx.textAlign = align; ctx.textBaseline = 'middle';
+  ctx.fillText(str, x, y);
+  ctx.restore();
+}
+
+function rr(ctx, x, y, w, h, r, fill, stroke, lw=1) {
+  ctx.beginPath(); ctx.roundRect(x, y, w, h, r);
+  if (fill)  { ctx.fillStyle = fill; ctx.fill(); }
+  if (stroke){ ctx.strokeStyle = stroke; ctx.lineWidth = lw; ctx.stroke(); }
+}
+
+function arr(ctx, x1, y1, x2, y2, col='#a78bfa', lw=2) {
+  const a = Math.atan2(y2-y1, x2-x1);
+  ctx.save(); ctx.strokeStyle = col; ctx.fillStyle = col; ctx.lineWidth = lw;
+  ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(x2, y2);
+  ctx.lineTo(x2-10*Math.cos(a-.4), y2-10*Math.sin(a-.4));
+  ctx.lineTo(x2-10*Math.cos(a+.4), y2-10*Math.sin(a+.4));
+  ctx.closePath(); ctx.fill();
+  ctx.restore();
+}
+
+// ════════════════════════════════════════════════════════
+//  S1 — Vraie radio + grille de pixels
+// ════════════════════════════════════════════════════════
+function drawS1() {
+  const c = gc('cv1'); if (!c.width) { anims[0]=requestAnimationFrame(drawS1); return; }
+  const ctx = c.getContext('2d'), W = c.width, H = c.height;
+  bg(ctx, W, H);
+
+  // ── Vraie radio à gauche ──
+  const imgW = W * 0.38, imgH = H * 0.86;
+  const imgX = W * 0.02, imgY = H * 0.07;
+  rr(ctx, imgX, imgY, imgW, imgH, 8, '#0a0e14', '#30363d');
+
+  if (xrayNormal.complete && xrayNormal.naturalWidth > 0) {
+    // Dessiner la vraie radio en respectant le ratio
+    const ratio = xrayNormal.naturalWidth / xrayNormal.naturalHeight;
+    let dw = imgW - 8, dh = dw / ratio;
+    if (dh > imgH - 8) { dh = imgH - 8; dw = dh * ratio; }
+    const dx = imgX + (imgW - dw) / 2, dy = imgY + (imgH - dh) / 2;
+    ctx.save();
+    ctx.beginPath(); ctx.roundRect(imgX+2, imgY+2, imgW-4, imgH-4, 6); ctx.clip();
+    ctx.drawImage(xrayNormal, dx, dy, dw, dh);
+    ctx.restore();
+  }
+
+  rr(ctx, imgX, imgY+imgH-28, imgW, 28, [0,0,6,6], '#0009', null);
+  t(ctx, 'Radiographie NORMAL — 1 812 × 1 325 px', imgX+imgW/2, imgY+imgH-14, 11, '#8b949e');
+
+  // ── Grille de pixels à droite ──
+  const cols=10, rows=7;
+  const cell = Math.min((W*0.52)/cols, (H*0.84)/rows);
+  const GX = W*0.45, GY = (H - rows*cell) / 2;
+
+  t(ctx, 'Valeurs réelles d\'un patch de pixels', GX+cols*cell/2, GY-18, 13, '#8b949e');
+
+  // Valeurs simulées réalistes (comme une zone de poumon)
+  const vals=[
+    [168,172,165,140,120,132,158,171,169,162],
+    [170,175,168,138,112,128,155,173,172,165],
+    [165,168,162,132,108,124,150,168,167,160],
+    [152,155,148,118, 95,110,138,155,154,147],
+    [140,143,136,106, 84, 98,126,143,142,135],
+    [148,152,145,115, 92,106,134,151,150,143],
+    [158,162,155,128,105,118,145,161,160,153],
+  ];
+  for (let r=0; r<rows; r++) for (let c2=0; c2<cols; c2++) {
+    const v = vals[r][c2];
+    ctx.fillStyle = `rgb(${v},${v},${v})`;
+    ctx.fillRect(GX+c2*cell, GY+r*cell, cell-1, cell-1);
+    ctx.strokeStyle = '#30363d44'; ctx.lineWidth = .5;
+    ctx.strokeRect(GX+c2*cell, GY+r*cell, cell-1, cell-1);
+    const sz = Math.max(8, Math.min(13, cell*0.3));
+    t(ctx, v, GX+c2*cell+cell/2, GY+r*cell+cell/2, sz, v > 140 ? '#1a202c' : '#c9d1d9');
+  }
+
+  // Annotations
+  t(ctx, '0 = noir', GX-2, GY+rows*cell+18, 11, '#6e7681', 'left');
+  t(ctx, '255 = blanc', GX+cols*cell+2, GY+rows*cell+18, 11, '#6e7681', 'right');
+  t(ctx, '(extrait de 10×7 pixels de la radio réelle)', GX+cols*cell/2, GY+rows*cell+34, 11, '#484f58');
+
+  // Flèche radio → grille
+  arr(ctx, imgX+imgW+10, imgY+imgH/2, GX-12, GY+rows*cell/2, '#a78bfa', 2);
+  t(ctx, 'zoom', imgX+imgW+32, imgY+imgH/2-16, 11, '#a78bfa');
+  t(ctx, 'pixels', imgX+imgW+32, imgY+imgH/2, 11, '#a78bfa');
+  // (pas d'animation ici, image statique)
+}
+
+// ════════════════════════════════════════════════════════
+//  S2 — Prétraitement avec vraie radio
+// ════════════════════════════════════════════════════════
+let s2t = 0;
+function drawS2() {
+  const c = gc('cv2'); if (!c.width) { anims[1]=requestAnimationFrame(drawS2); return; }
+  // Si les images ne sont pas encore chargées, réessayer au prochain frame
+  if (!xrayPneumo.complete || !xrayPneumo.naturalWidth) { anims[1]=requestAnimationFrame(drawS2); return; }
+  const ctx = c.getContext('2d'), W = c.width, H = c.height;
+  bg(ctx, W, H);
+
+  // ════ LAYOUT ════════════════════════════════════════════════════════
+  // Gauche : radio originale (40%)
+  // Centre : 3 étapes fléchées (20%)
+  // Droite : résultat 64×64 avec zoom pixel (40%)
+
+  const pad    = 14;
+  const imgW   = W * 0.38;
+  const imgH   = H * 0.80;
+  const imgY   = (H - imgH) / 2;
+  const col1X  = pad;
+  const col3X  = W - pad - imgW;
+  const midX   = col1X + imgW;
+  const midW   = col3X - midX;
+
+  // ── Col 1 : radio originale ──────────────────────────────────────
+  rr(ctx, col1X, imgY, imgW, imgH, 8, '#0a0e14', '#30363d');
+
+  const ratio  = xrayPneumo.naturalWidth / xrayPneumo.naturalHeight;
+  let dw = imgW-8, dh = dw/ratio;
+  if (dh > imgH-8) { dh = imgH-8; dw = dh*ratio; }
+  const dx = col1X+4+(imgW-8-dw)/2, dy = imgY+4+(imgH-8-dh)/2;
+  ctx.save(); ctx.beginPath(); ctx.roundRect(col1X+2,imgY+2,imgW-4,imgH-4,6); ctx.clip();
+  ctx.drawImage(xrayPneumo, dx, dy, dw, dh);
+  ctx.restore();
+
+  // Annotations sur la photo
+  rr(ctx, col1X+8, imgY+8, imgW-16, 40, 5, '#0d1117bb', null);
+  t(ctx, 'Radiographie originale (PNEUMONIE)', col1X+imgW/2, imgY+20, 12, '#e2e8f0');
+  t(ctx, '1 280 × 863 pixels  ·  entiers [0–255]', col1X+imgW/2, imgY+36, 11, '#94a3b8');
+
+  // Pixel value bubble
+  rr(ctx, col1X+imgW-70, imgY+imgH-38, 62, 26, 5, '#0d1117cc', '#f59e0b', 1.5);
+  t(ctx, 'pixel: 173', col1X+imgW-39, imgY+imgH-25, 10, '#f59e0b');
+
+  // ── Centre : 3 étapes ───────────────────────────────────────────
+  const steps = [
+    { label: '① Niveaux de gris', sub: '3 canaux → 1 canal', color: '#8b5cf6' },
+    { label: '② Resize 64×64',    sub: 'Taille fixe requise', color: '#ec4899' },
+    { label: '③ ÷ 255',           sub: 'Flottants [0.0–1.0]', color: '#6ee7b7' },
+  ];
+  const stepH  = (imgH - 20) / steps.length;
+  steps.forEach((s, i) => {
+    const sy = imgY + 10 + i * stepH;
+    const cy = sy + stepH/2;
+    // Flèche horizontale
+    const ax1 = midX + 8, ax2 = col3X - 8;
+    arr(ctx, ax1, cy, ax2, cy, s.color, 2);
+    // Étiquette sur la flèche
+    rr(ctx, ax1+(ax2-ax1)*0.1, cy-22, (ax2-ax1)*0.8, 38, 6, '#161b22', s.color, 1.5);
+    t(ctx, s.label, (ax1+ax2)/2, cy-9, 13, s.color, 'center', 'bold');
+    t(ctx, s.sub,   (ax1+ax2)/2, cy+9, 11, '#8b949e');
+  });
+
+  // ── Col 3 : résultat 64×64 ──────────────────────────────────────
+  rr(ctx, col3X, imgY, imgW, imgH, 8, '#0a0e14', '#30363d');
+
+  // Image pixelisée (simule le 64×64)
+  const zoom   = Math.min((imgW*0.56)/64, (imgH*0.56)/64);
+  const pxW    = 64*zoom, pxH = 64*zoom;
+  const pxX    = col3X + (imgW - pxW)/2;
+  const pxY    = imgY  + imgH*0.06;
+
+  ctx.save(); ctx.beginPath(); ctx.roundRect(col3X+2,imgY+2,imgW-4,imgH-4,6); ctx.clip();
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(xrayPneumo, pxX, pxY, pxW, pxH);
+  ctx.imageSmoothingEnabled = true;
+
+  // Grille légère par-dessus
+  ctx.strokeStyle = '#a78bfa22'; ctx.lineWidth = 0.4;
+  const step = zoom * 8;
+  for (let i=0; i<=Math.ceil(pxW/step); i++) {
+    const lx = pxX + i*step;
+    ctx.beginPath(); ctx.moveTo(lx,pxY); ctx.lineTo(lx,pxY+pxH); ctx.stroke();
+  }
+  for (let i=0; i<=Math.ceil(pxH/step); i++) {
+    const ly = pxY + i*step;
+    ctx.beginPath(); ctx.moveTo(pxX,ly); ctx.lineTo(pxX+pxW,ly); ctx.stroke();
+  }
+  ctx.restore();
+
+  // Annotations
+  rr(ctx, col3X+8, imgY+8, imgW-16, 40, 5, '#0d1117bb', null);
+  t(ctx, 'Après prétraitement', col3X+imgW/2, imgY+20, 12, '#e2e8f0');
+  t(ctx, '64 × 64 pixels  ·  flottants [0.0–1.0]', col3X+imgW/2, imgY+36, 11, '#94a3b8');
+
+  // Zoom patch avec vraies valeurs normalisées
+  const normVals = [[0.66,0.68,0.47,0.44],[0.61,0.57,0.43,0.40],[0.56,0.52,0.37,0.35],[0.54,0.59,0.42,0.38]];
+  const nc = 4;
+  const cellPx = Math.min(38, (imgW - 24) / nc);
+  const zpX = col3X + imgW/2 - (nc*cellPx)/2;
+  const zpY = imgY + pxH + imgH*0.08;
+
+  t(ctx, 'Valeurs réelles des pixels :', col3X+imgW/2, zpY-14, 11, '#f59e0b');
+  normVals.forEach((row, ri) => row.forEach((v, ci) => {
+    const g = Math.round(v*210);
+    ctx.fillStyle = `rgb(${g},${g},${g})`;
+    ctx.fillRect(zpX+ci*cellPx, zpY+ri*cellPx, cellPx-1, cellPx-1);
+    ctx.strokeStyle='#30363d'; ctx.lineWidth=.5;
+    ctx.strokeRect(zpX+ci*cellPx, zpY+ri*cellPx, cellPx-1, cellPx-1);
+    const fs = Math.max(8, cellPx*0.26);
+    t(ctx, v.toFixed(2), zpX+ci*cellPx+cellPx/2, zpY+ri*cellPx+cellPx/2, fs, v>.55?'#0d1117':'#e2e8f0');
+  }));
+  ctx.strokeStyle='#f59e0b'; ctx.lineWidth=1.5;
+  ctx.strokeRect(zpX, zpY, nc*cellPx, nc*cellPx);
+
+  // Fin — pas de boucle RAF car slide statique
+}
+
+// ════════════════════════════════════════════════════════
+//  S3 — Convolution avec patch de vraie radio
+// ════════════════════════════════════════════════════════
+const cFilt=[[-1,0,1],[-2,0,2],[-1,0,1]];
+let convT=0, cPos={i:0,j:0};
+// Vraies valeurs de pixel issues d'une zone de radio (normalisées)
+const cInput=[
+  [0.64,0.65,0.44,0.42,0.60,0.64,0.59,0.63],
+  [0.66,0.68,0.47,0.44,0.61,0.66,0.62,0.66],
+  [0.61,0.63,0.43,0.40,0.57,0.62,0.58,0.61],
+  [0.56,0.58,0.38,0.35,0.52,0.57,0.53,0.56],
+  [0.52,0.54,0.35,0.32,0.48,0.53,0.49,0.52],
+  [0.54,0.56,0.37,0.34,0.50,0.55,0.51,0.54],
+  [0.59,0.61,0.42,0.39,0.55,0.60,0.56,0.59],
+  [0.62,0.64,0.45,0.42,0.58,0.63,0.59,0.62],
+];
+let cOut = Array(6).fill(null).map(()=>Array(6).fill(null));
+function calcC(i,j){let s=0;for(let fi=0;fi<3;fi++)for(let fj=0;fj<3;fj++)s+=cInput[i+fi][j+fj]*cFilt[fi][fj];return Math.max(0,s);}
+
+function drawS3() {
+  const c = gc('cv3'); if (!c.width) { anims[2]=requestAnimationFrame(drawS3); return; }
+  const ctx = c.getContext('2d'), W = c.width, H = c.height;
+  bg(ctx, W, H);
+  convT++;
+  if (convT % 50 === 0) {
+    cOut[cPos.i][cPos.j] = calcC(cPos.i, cPos.j);
+    if (++cPos.j > 5) { cPos.j=0; if (++cPos.i > 5) { cPos.i=0; cOut=Array(6).fill(null).map(()=>Array(6).fill(null)); } }
+  }
+
+  // ── Layout 3 colonnes fixes ──
+  // Col1 : input 8×8   (x: 0-34%)
+  // Col2 : filtre+calc  (x: 36-64%)
+  // Col3 : feature map  (x: 66-98%)
+  const cell = Math.min(H*0.085, W*0.038);   // taille cellule input
+  const GX   = W*0.02;
+  const GY   = (H - 8*cell) / 2;
+
+  // ── Col1 : grille input ──
+  t(ctx,'Patch radio (8×8 px)',GX+4*cell,GY-18,11,'#6e7681');
+  t(ctx,'valeurs [0,1]',GX+4*cell,GY-7,9,'#484f58');
+  for (let r=0;r<8;r++) for (let c2=0;c2<8;c2++) {
+    const v=cInput[r][c2], inP=r>=cPos.i&&r<=cPos.i+2&&c2>=cPos.j&&c2<=cPos.j+2;
+    const g=Math.round(v*220);
+    ctx.fillStyle=inP?`rgba(167,139,250,0.35)`:`rgb(${g},${g},${g})`;
+    ctx.fillRect(GX+c2*cell,GY+r*cell,cell-1,cell-1);
+    if(inP){ctx.strokeStyle='#a78bfa';ctx.lineWidth=1.5;ctx.strokeRect(GX+c2*cell,GY+r*cell,cell-1,cell-1);}
+    t(ctx,v.toFixed(1),GX+c2*cell+cell/2,GY+r*cell+cell/2,Math.max(6,cell*.26),v>.5?'#0d1117':'#8b949e');
+  }
+
+  // ── Col2 : filtre 3×3 en haut, calc en bas ──
+  const fc = Math.min(H*0.12, W*0.07);
+  const FX = W*0.38, FY = H*0.05;
+  t(ctx,'Filtre 3×3',FX+fc*1.5,FY-14,11,'#6e7681');
+  t(ctx,'(poids appris)',FX+fc*1.5,FY-3,9,'#484f58');
+  for(let r=0;r<3;r++) for(let c2=0;c2<3;c2++){
+    const w=cFilt[r][c2];
+    ctx.fillStyle=w>0?'rgba(34,197,94,.6)':w<0?'rgba(239,68,68,.6)':'#1e293b';
+    ctx.fillRect(FX+c2*fc,FY+r*fc,fc-2,fc-2);
+    ctx.strokeStyle='#21262d';ctx.lineWidth=1;ctx.strokeRect(FX+c2*fc,FY+r*fc,fc-2,fc-2);
+    t(ctx,w,FX+c2*fc+fc/2,FY+r*fc+fc/2,Math.max(11,fc*.28),'#e2e8f0','center','bold');
+  }
+
+  // Calcul sous le filtre
+  const pi=cPos.i,pj=cPos.j;
+  let parts=[],tot=0;
+  for(let r=0;r<3;r++) for(let c2=0;c2<3;c2++){const v=cInput[pi+r][pj+c2],w=cFilt[r][c2],p=v*w;parts.push({v,w,p});tot+=p;}
+  const rv=Math.max(0,tot);
+  const CX=W*0.36, CY=FY+3*fc+H*0.05, CW=W*0.28, CH=H-CY-H*0.04;
+  rr(ctx,CX,CY,CW,CH,6,'#0d1117','#30363d');
+  t(ctx,`Position [${pi},${pj}] — produit scalaire`,CX+CW/2,CY+14,11,'#8b949e');
+
+  // 9 termes en grille 3×3 avec une police lisible
+  const lh = Math.min(22, (CH - 70) / 3);
+  parts.forEach((p,i)=>{
+    const row=Math.floor(i/3), col=i%3;
+    const cc=p.w>0?'#6ee7b7':p.w<0?'#fca5a5':'#6e7681';
+    const label=`${p.v.toFixed(1)} × ${p.w} = ${p.p.toFixed(2)}`;
+    t(ctx,label, CX+10+col*(CW*0.325), CY+34+row*lh, 11, cc, 'left');
+  });
+
+  ctx.strokeStyle='#30363d';ctx.lineWidth=1;
+  ctx.beginPath();ctx.moveTo(CX+10,CY+CH-38);ctx.lineTo(CX+CW-10,CY+CH-38);ctx.stroke();
+  t(ctx,`Somme = ${tot.toFixed(3)}`,CX+CW/2,CY+CH-24,12,'#8b949e');
+  t(ctx,`ReLU → ${rv.toFixed(3)}`,CX+CW/2,CY+CH-9,13,rv>0?'#6ee7b7':'#f97316','center','bold');
+
+  // ── Col3 : feature map 6×6 (couleur uniquement, pas de texte) ──
+  const oc = Math.min(H*0.115, W*0.05);
+  const OX = W*0.67, OY = (H - 6*oc) / 2;
+  t(ctx,'Feature map (6×6)',OX+3*oc,OY-18,11,'#6e7681');
+  t(ctx,'intensité = activation',OX+3*oc,OY-7,9,'#484f58');
+  const maxOut=0.55;
+  for(let r=0;r<6;r++) for(let c2=0;c2<6;c2++){
+    const val=cOut[r][c2],isCur=r===pi&&c2===pj;
+    const opacity=val!==null?Math.min(val/maxOut,1)*.85+.05:0.04;
+    ctx.fillStyle=`rgba(167,139,250,${opacity})`;
+    ctx.fillRect(OX+c2*oc,OY+r*oc,oc-1,oc-1);
+    ctx.strokeStyle=isCur?'#a78bfa':'#30363d44';ctx.lineWidth=isCur?2:.4;
+    ctx.strokeRect(OX+c2*oc,OY+r*oc,oc-1,oc-1);
+    // Valeur numérique dans la cellule
+    if(val!==null){
+      const textColor=opacity>0.5?'#0d1117':'#e2e8f0';
+      t(ctx,val.toFixed(2),OX+c2*oc+oc/2,OY+r*oc+oc/2,Math.max(8,oc*0.24),textColor);
+    }
+  }
+  // Légende couleur sous la feature map
+  const lx=OX, ly=OY+6*oc+10, lw=6*oc;
+  const lg=ctx.createLinearGradient(lx,ly,lx+lw,ly);
+  lg.addColorStop(0,'rgba(167,139,250,0.05)'); lg.addColorStop(1,'rgba(167,139,250,0.9)');
+  ctx.fillStyle=lg; ctx.fillRect(lx,ly,lw,8);
+  t(ctx,'0',lx,ly+18,9,'#6e7681','left'); t(ctx,'fort',lx+lw,ly+18,9,'#a78bfa','right');
+
+  // Flèches de liaison
+  arr(ctx,GX+8*cell+6,GY+4*cell,FX-4,FY+1.5*fc,'#a78bfa44',1.5);
+  arr(ctx,CX+CW+4,CY+CH/2,OX-4,OY+3*oc,'#a78bfa',1.5);
+
+  anims[2]=requestAnimationFrame(drawS3);
+}
+
+// ════════════════════════════════════════════════════════
+//  S4 — ReLU
+// ════════════════════════════════════════════════════════
+let s4t=0;
+const reluVals=[-1.4, -0.8, 0.6, 1.3, -0.3, 0.9, -1.1, 1.7];
+function drawS4(){
+  const c=gc('cv4');if(!c.width){anims[3]=requestAnimationFrame(drawS4);return;}
+  const ctx=c.getContext('2d'),W=c.width,H=c.height; bg(ctx,W,H);
+  s4t++;
+
+  const n = reluVals.length;
+  const pad = 10;
+
+  // ── Dimensions adaptatives (cellules) ──
+  const cellW   = Math.floor((W - pad*2) / n) - 4;
+  const cellGap = Math.floor((W - pad*2 - n*cellW) / (n-1));
+  const startX  = pad;
+
+  // ── Hauteurs fixes ──
+  const formulaH = 36;
+  const labelH   = 18;
+  const legendH  = 32;
+
+  // Les flèches et les boîtes prennent le reste de la hauteur
+  const nGaps    = 6;   // espaces entre les 7 zones
+  const minGap   = 6;
+  const arrowH   = Math.max(28, Math.min(50, (H - formulaH - 2*labelH - legendH - nGaps*minGap) * 0.18));
+  const cellH    = Math.max(36, Math.min(90, (H - formulaH - 2*labelH - arrowH - legendH - nGaps*minGap) / 2));
+
+  // ── Hauteur totale du contenu et offset pour centrer ──
+  const totalH = formulaH + labelH + cellH + arrowH + labelH + cellH + legendH + nGaps*minGap;
+  const extraPerGap = Math.max(0, (H - totalH)) / (nGaps + 1);
+  const g = minGap + extraPerGap;   // écart réel, distribué uniformément
+
+  const valFont = Math.max(13, Math.min(22, cellH * 0.32));
+
+  // ── Positions Y : tout centré verticalement ──
+  let y = g;
+  const fY  = y;  y += formulaH + g;
+  const l1Y = y;  y += labelH   + g;
+  const b1Y = y;  y += cellH    + g;
+  const aY  = y;  y += arrowH;
+  const l2Y = y;  y += labelH   + g;
+  const b2Y = y;  y += cellH    + g;
+  const legY = y;
+
+  // ── Formule ──
+  rr(ctx, W*0.22, fY, W*0.56, formulaH, 6, '#13111e', '#a78bfa', 2);
+  t(ctx, 'f(x) = max(0, x)', W/2, fY + formulaH/2, Math.min(18, formulaH*0.52), '#a78bfa', 'center', 'bold');
+
+  // ── Labels ──
+  t(ctx, 'ENTRÉE — valeurs brutes (avant ReLU)', W/2, l1Y + labelH/2, 12, '#94a3b8', 'center', 'bold');
+  t(ctx, 'SORTIE — valeurs après ReLU',          W/2, l2Y + labelH/2, 12, '#6ee7b7', 'center', 'bold');
+
+  // ── Boîtes + flèches ──
+  reluVals.forEach((v, i) => {
+    const pos = v > 0;
+    const bx  = startX + i * (cellW + cellGap);
+    const cx  = bx + cellW / 2;
+
+    // Boîte AVANT
+    rr(ctx, bx, b1Y, cellW, cellH, 6, pos?'#14532d':'#7f1d1d', pos?'#6ee7b7':'#fca5a5', 2);
+    t(ctx, v.toFixed(1), cx, b1Y+cellH/2, valFont, pos?'#6ee7b7':'#fca5a5', 'center', 'bold');
+
+    // Flèche
+    const ay1 = b1Y + cellH + 3, ay2 = b2Y - 3;
+    const amid = (ay1+ay2)/2;
+    ctx.strokeStyle = pos ? '#6ee7b7aa' : '#ef4444aa';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(cx, ay1); ctx.lineTo(cx, ay2-6); ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(cx,ay2); ctx.lineTo(cx-5,ay2-8); ctx.lineTo(cx+5,ay2-8);
+    ctx.closePath(); ctx.fillStyle = pos?'#6ee7b7aa':'#ef4444aa'; ctx.fill();
+    // Label sur flèche (seulement si assez de place)
+    if (arrowH > 28) {
+      t(ctx, pos ? '=' : '→ 0', cx, amid, 9, pos?'#6e7681':'#ef4444');
+    }
+
+    // Boîte APRÈS
+    if (pos) {
+      rr(ctx, bx, b2Y, cellW, cellH, 6, '#14532d', '#6ee7b7', 2);
+      t(ctx, v.toFixed(1), cx, b2Y+cellH/2, valFont, '#6ee7b7', 'center', 'bold');
+    } else {
+      rr(ctx, bx, b2Y, cellW, cellH, 6, '#1c2333', '#374151', 1.5);
+      t(ctx, '0', cx, b2Y+cellH/2, valFont, '#64748b', 'center', 'bold');
+    }
+  });
+
+  // ── Légende ──
+  if (legY + legendH <= H) {
+    rr(ctx, pad, legY, W-pad*2, legendH, 5, '#0d1117', '#21262d');
+    const lm = legY + legendH/2;
+    rr(ctx, pad+10, lm-7, 14, 14, 3, '#14532d', '#6ee7b7', 1.5);
+    t(ctx, 'Valeur positive → conservée', pad+30, lm, 11, '#6ee7b7', 'left');
+    rr(ctx, W/2+10, lm-7, 14, 14, 3, '#1c2333', '#374151', 1.5);
+    t(ctx, 'Valeur négative → remplacée par 0', W/2+30, lm, 11, '#fca5a5', 'left');
+  }
+
+  anims[3]=requestAnimationFrame(drawS4);
+}
+
+// ════════════════════════════════════════════════════════
+//  S5 — Max Pooling
+// ════════════════════════════════════════════════════════
+// Vraies valeurs (normalisées, d'une feature map typique)
+const pIn=[
+  [45,230,72,198,38,212],[138,85,218,52,182,28],
+  [65,200,35,225,85,172],[208,40,165,68,238,55],
+  [90,182,128,45,200,78],[152,58,212,130,52,248],
+];
+let s5t=0,pReg=0;
+function drawS5(){
+  const c=gc('cv5');if(!c.width){anims[4]=requestAnimationFrame(drawS5);return;}
+  const ctx=c.getContext('2d'),W=c.width,H=c.height; bg(ctx,W,H);
+  s5t++;
+  if(s5t%65===0)pReg=(pReg+1)%9;
+  const pr=Math.floor(pReg/3)*2, pc=(pReg%3)*2;
+
+  const cell=Math.min(H*0.13,W*0.095);
+  const GX=(W*0.46-3*cell)/2+W*0.02, GY=(H-6*cell)/2;
+  t(ctx,'Feature map d\'entrée (6×6)',GX+3*cell,GY-22,13,'#6e7681');
+
+  for(let r=0;r<6;r++) for(let c2=0;c2<6;c2++){
+    const inR=r>=pr&&r<pr+2&&c2>=pc&&c2<pc+2;
+    const v=pIn[r][c2];
+    const m=Math.max(pIn[pr][pc],pIn[pr][pc+1],pIn[pr+1][pc],pIn[pr+1][pc+1]);
+    const isMax=inR&&v===m;
+    ctx.fillStyle=isMax?'#14532d':inR?'#1c2a1e':`rgb(${v},${v},${v})`;
+    ctx.fillRect(GX+c2*cell,GY+r*cell,cell-2,cell-2);
+    ctx.strokeStyle=inR?'#6ee7b7':'#21262d';ctx.lineWidth=inR?2:.5;
+    ctx.strokeRect(GX+c2*cell,GY+r*cell,cell-2,cell-2);
+    t(ctx,v,GX+c2*cell+cell/2,GY+r*cell+cell/2,Math.max(10,cell*.28),isMax?'#86efac':inR?'#4ade80':v>140?'#0d1117':'#a0aec0','center',isMax?'bold':'normal');
+    if(isMax)t(ctx,'★',GX+c2*cell+cell-10,GY+r*cell+10,10,'#6ee7b7');
+  }
+
+  // Flèche
+  const ax=GX+6*cell+20;
+  arr(ctx,ax,GY+3*cell,ax+W*0.13,GY+3*cell,'#a78bfa',2);
+  t(ctx,'MAX',ax+W*0.065,GY+3*cell-20,13,'#a78bfa','center','bold');
+  t(ctx,'POOL 2×2',ax+W*0.065,GY+3*cell-5,12,'#a78bfa');
+
+  // Output 3×3
+  const oc=Math.min(H*0.18,W*0.13);
+  const OX=ax+W*0.16, OY=(H-3*oc)/2;
+  const pOut=[[230,225,212],[208,238,248],[212,248,248]];
+  t(ctx,'Sortie max pool (3×3)',OX+1.5*oc,OY-22,13,'#6e7681');
+  for(let r=0;r<3;r++) for(let c2=0;c2<3;c2++){
+    const cur=r*3+c2===pReg,v=pOut[r][c2];
+    ctx.fillStyle=cur?'#14532d':'#1e293b';
+    ctx.fillRect(OX+c2*oc,OY+r*oc,oc-2,oc-2);
+    ctx.strokeStyle=cur?'#6ee7b7':'#30363d';ctx.lineWidth=cur?2:.8;
+    ctx.strokeRect(OX+c2*oc,OY+r*oc,oc-2,oc-2);
+    t(ctx,v,OX+c2*oc+oc/2,OY+r*oc+oc/2,Math.max(13,oc*.28),cur?'#86efac':'#8b949e','center','bold');
+  }
+  rr(ctx,W*0.08,H*0.91,W*0.84,28,5,'#0d1117','#30363d');
+  t(ctx,'★ = maximum de la région 2×2  ·  Résolution : 6×6 → 3×3 (÷2 dans chaque dimension)',W/2,H*0.924,12,'#8b949e');
+
+  anims[4]=requestAnimationFrame(drawS5);
+}
+
+// ════════════════════════════════════════════════════════
+//  S6 — Couche Dense
+// ════════════════════════════════════════════════════════
+const dW=[[ 0.8,-0.5, 0.3,-0.7, 0.9],[-0.4, 0.6,-0.8, 0.5,-0.3]];
+const dX=[0.72,0.18,0.85,0.12,0.64];
+let s6t=0;
+function drawS6(){
+  const c=gc('cv6');if(!c.width){anims[5]=requestAnimationFrame(drawS6);return;}
+  const ctx=c.getContext('2d'),W=c.width,H=c.height; bg(ctx,W,H);
+  s6t++;
+
+  const nr=Math.min(22,H*0.055);
+  const x1=W*0.14,x2=W*0.52,x3=W*0.76;
+  const y1s=[0,1,2,3,4].map(i=>H*0.15+i*(H*0.7/4));
+  const y2s=[H*0.36,H*0.64];
+  const sig=v=>1/(1+Math.exp(-v));
+
+  // Connexions avec particules
+  for(let j=0;j<2;j++) for(let i=0;i<5;i++){
+    const w=dW[j][i],op=Math.min(Math.abs(w),1);
+    const flow=(s6t*1.8+i*22+j*45)%100/100;
+    ctx.save();
+    ctx.strokeStyle=w>0?`rgba(34,197,94,${op*.8+.1})`:`rgba(239,68,68,${op*.8+.1})`;
+    ctx.lineWidth=op*3.5+.4;
+    ctx.beginPath();ctx.moveTo(x1+nr,y1s[i]);ctx.lineTo(x2-nr,y2s[j]);ctx.stroke();
+    // Particule
+    const px2=(x1+nr)+((x2-nr)-(x1+nr))*flow;
+    const py2=y1s[i]+(y2s[j]-y1s[i])*flow;
+    ctx.beginPath();ctx.arc(px2,py2,4,0,Math.PI*2);
+    ctx.fillStyle=w>0?'#6ee7b7':'#fca5a5';ctx.fill();
+    // Label poids
+    const mx=(x1+nr+x2-nr)/2,my=(y1s[i]+y2s[j])/2;
+    ctx.fillStyle='#0d1117';ctx.fillRect(mx-16,my-8,32,15);
+    t(ctx,'w='+w,mx,my-1,9,w>0?'#6ee7b7':'#fca5a5');
+    ctx.restore();
+  }
+
+  // Neurones Dense1
+  t(ctx,'Dense 1\n(128 neurones)',x1,H*0.07,12,'#6e7681');
+  t(ctx,'(5 montrés ici)',x1,H*0.07+15,10,'#484f58');
+  y1s.forEach((y,i)=>{
+    const a=dX[i],g=Math.round(a*200);
+    ctx.beginPath();ctx.arc(x1,y,nr,0,Math.PI*2);
+    ctx.fillStyle=`rgb(${g+30},${Math.round(g*.6)},20)`;ctx.fill();
+    ctx.strokeStyle='#a78bfa';ctx.lineWidth=1.5;ctx.stroke();
+    t(ctx,a.toFixed(2),x1,y,10,'#fff','center','bold');
+    t(ctx,'x'+(i+1),x1-nr-16,y,10,'#6e7681');
+  });
+
+  // Neurones Dense2
+  t(ctx,'Dense 2',x2,H*0.07,12,'#6e7681');
+  dW.forEach((ws,j)=>{
+    const raw=ws.reduce((s,w,i)=>s+w*dX[i],0.1);
+    const sv=sig(raw);
+    const col=sv>.5?'#14532d':'#7f1d1d',brd=sv>.5?'#6ee7b7':'#fca5a5';
+    ctx.beginPath();ctx.arc(x2,y2s[j],nr*1.3,0,Math.PI*2);
+    ctx.fillStyle=col;ctx.fill();ctx.strokeStyle=brd;ctx.lineWidth=2;ctx.stroke();
+    t(ctx,sv.toFixed(3),x2,y2s[j],10,'#fff','center','bold');
+    // Boîte formule
+    const fx=x2+nr*1.5+8, fw=W*0.28, fy=y2s[j];
+    rr(ctx,fx,fy-46,fw,92,6,'#0d1117','#30363d');
+    t(ctx,'Score brut',fx+fw/2,fy-32,10,'#6e7681');
+    t(ctx,'= Σ(wᵢ × xᵢ) + b',fx+fw/2,fy-18,10,'#8b949e');
+    t(ctx,'= '+raw.toFixed(3),fx+fw/2,fy-4,12,'#c9d1d9','center','bold');
+    ctx.strokeStyle='#30363d';ctx.lineWidth=.8;
+    ctx.beginPath();ctx.moveTo(fx+10,fy+8);ctx.lineTo(fx+fw-10,fy+8);ctx.stroke();
+    t(ctx,'sigmoid('+raw.toFixed(3)+') = '+sv.toFixed(3),fx+fw/2,fy+22,10,sv>.5?'#6ee7b7':'#fca5a5');
+    t(ctx,sv>.5?'→ PNEUMONIE':'→ NORMAL',fx+fw/2,fy+38,12,sv>.5?'#fca5a5':'#86efac','center','bold');
+  });
+
+  anims[5]=requestAnimationFrame(drawS6);
+}
+
+// ════════════════════════════════════════════════════════
+//  S7 — Apprentissage : flux vertical + graphique
+// ════════════════════════════════════════════════════════
+let s7t=0;
+function drawS7(){
+  const c=gc('cv7');if(!c.width){anims[6]=requestAnimationFrame(drawS7);return;}
+  const ctx=c.getContext('2d'),W=c.width,H=c.height; bg(ctx,W,H);
+  s7t++;
+  const tv=(s7t*0.6)%320;  // 0→320 puis repart
+  const step=Math.floor(tv/64); // étape active 0-4
+
+  // ── Gauche : 4 cards en colonne + flèche retour ──────────────────
+  const CW=W*0.30, CH=H*0.17, CX=W*0.04;
+  const steps=[
+    {lbl:'Prédiction',    sub:'Le réseau traite le batch et calcule ŷ'},
+    {lbl:'Calcul Loss',   sub:'L = −y·log(ŷ) − (1−y)·log(1−ŷ)'},
+    {lbl:'Backpropagation',sub:'Gradient ∂L/∂w calculé couche par couche'},
+    {lbl:'Mise à jour',   sub:'w ← w − lr × ∂L/∂w  (SGD + Momentum)'},
+  ];
+  const totalH=steps.length*CH+(steps.length-1)*H*0.05;
+  const startY=(H-totalH)/2;
+
+  steps.forEach((s,i)=>{
+    const cy=startY+i*(CH+H*0.05);
+    const a=i===step%4;
+    rr(ctx,CX,cy,CW,CH,8,a?'#1e1b3a':'#0d1117',a?'#a78bfa':'#30363d',a?2:1);
+
+    // Icône
+    ctx.font=`${Math.round(CH*0.36)}px sans-serif`;ctx.textAlign='left';ctx.textBaseline='middle';
+    // Texte — taille adaptée à la hauteur de la card
+    const lblFont = Math.max(13, Math.min(18, CH * 0.22));
+    const subFont = Math.max(11, Math.min(15, CH * 0.17));
+    t(ctx,s.lbl,CX+CW*0.12,cy+CH*0.3,lblFont,a?'#e2e8f0':'#8b949e','left','bold');
+    t(ctx,s.sub,CX+CW*0.12,cy+CH*0.68,subFont,a?'#a78bfa':'#484f58','left');
+
+    // Flèche vers la suivante
+    if(i<steps.length-1){
+      const ay=cy+CH+2, ay2=cy+CH+H*0.05-2;
+      ctx.strokeStyle='#30363d';ctx.lineWidth=1.5;
+      ctx.beginPath();ctx.moveTo(CX+CW/2,ay);ctx.lineTo(CX+CW/2,ay2);ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(CX+CW/2,ay2);
+      ctx.lineTo(CX+CW/2-6,ay2-8);ctx.lineTo(CX+CW/2+6,ay2-8);
+      ctx.closePath();ctx.fillStyle='#30363d';ctx.fill();
+    }
+  });
+
+  // Flèche retour (à gauche des cards, de bas en haut)
+  const loopX=CX-18;
+  const topY=startY+CH/2, botY=startY+totalH-CH/2;
+  ctx.strokeStyle='#a78bfa66';ctx.lineWidth=1.5;
+  ctx.beginPath();ctx.moveTo(CX,botY);ctx.lineTo(loopX,botY);ctx.lineTo(loopX,topY);ctx.lineTo(CX,topY);ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(CX,topY);ctx.lineTo(CX-6,topY+8);ctx.lineTo(CX+6,topY+8);
+  ctx.closePath();ctx.fillStyle='#a78bfa66';ctx.fill();
+  t(ctx,'×N',loopX-14,H/2,10,'#a78bfa66');
+
+  // ── Droite : courbe Loss ──────────────────────────────────────────
+  const GX=W*0.40, GY=H*0.07, GW=W*0.56, GH=H*0.82;
+  rr(ctx,GX-6,GY-16,GW+12,GH+26,8,'#0d1117','#21262d');
+  t(ctx,'Évolution de la Loss pendant l\'entraînement',GX+GW/2,GY-6,13,'#6e7681');
+
+  // Axes
+  ctx.strokeStyle='#30363d';ctx.lineWidth=1.5;
+  ctx.beginPath();ctx.moveTo(GX,GY);ctx.lineTo(GX,GY+GH);ctx.lineTo(GX+GW,GY+GH);ctx.stroke();
+  t(ctx,'Loss',GX-6,GY+GH/2,11,'#484f58','right');
+  t(ctx,'Batches (temps)',GX+GW/2,GY+GH+14,11,'#484f58');
+
+  // Labels axe y
+  [0.8,0.6,0.4,0.2].forEach((v,i)=>{
+    const py=GY+GH-v*GH;
+    ctx.strokeStyle='#21262d';ctx.lineWidth=.6;ctx.setLineDash([3,3]);
+    ctx.beginPath();ctx.moveTo(GX,py);ctx.lineTo(GX+GW,py);ctx.stroke();
+    ctx.setLineDash([]);
+    t(ctx,v.toFixed(1),GX-6,py,9,'#484f58','right');
+  });
+
+  // Courbe Loss qui se dessine
+  const nP=120, drawn=Math.min(nP,Math.round(tv*nP/280));
+  ctx.strokeStyle='#a78bfa';ctx.lineWidth=2.5;ctx.beginPath();
+  for(let p=0;p<=drawn;p++){
+    const x=GX+p*GW/nP, prog=p/nP;
+    const noise=Math.sin(p*1.6)*.05+Math.sin(p*3.7)*.022;
+    const lv=0.72*Math.exp(-prog*2.8)+0.13+noise;
+    const y=GY+GH-lv*GH;
+    p===0?ctx.moveTo(x,y):ctx.lineTo(x,y);
+  }
+  ctx.stroke();
+
+  // Point courant animé
+  if(drawn<nP){
+    const prog2=drawn/nP,noise2=Math.sin(drawn*1.6)*.05+Math.sin(drawn*3.7)*.022;
+    const lv2=0.72*Math.exp(-prog2*2.8)+0.13+noise2;
+    const px2=GX+drawn*GW/nP, py2=GY+GH-lv2*GH;
+    ctx.beginPath();ctx.arc(px2,py2,7,0,Math.PI*2);
+    ctx.fillStyle='#a78bfa';ctx.fill();
+    ctx.strokeStyle='#0d1117';ctx.lineWidth=2;ctx.stroke();
+    rr(ctx,px2+12,py2-16,82,26,4,'#0d1117','#a78bfa');
+    t(ctx,'loss = '+lv2.toFixed(3),px2+53,py2-3,10,'#a78bfa');
+  }
+
+  // Ligne de convergence
+  ctx.strokeStyle='#6ee7b755';ctx.lineWidth=1.2;ctx.setLineDash([5,4]);
+  ctx.beginPath();ctx.moveTo(GX,GY+GH-0.14*GH);ctx.lineTo(GX+GW,GY+GH-0.14*GH);ctx.stroke();
+  ctx.setLineDash([]);
+  t(ctx,'~ minimum (convergence)',GX+GW-6,GY+GH-0.14*GH-11,10,'#6ee7b7','right');
+
+  anims[6]=requestAnimationFrame(drawS7);
+}
+
+function startAnim(idx){
+  [drawS1,drawS2,drawS3,drawS4,drawS5,drawS6,drawS7][idx]();
+}
+window.addEventListener('load',()=>setTimeout(()=>startAnim(0),50));
+
+// ════════════════════════════════════════════════════════
+//  INFERENCE
+// ════════════════════════════════════════════════════════
+const socket = io();
+
+// ── Graphique de contributions Dense ───────────────────
+let denseChart = null;
+const HIST_BINS = 14; // gardé pour resetResult
+
+function buildContribChart(contributions) {
+  // Tous les 128 neurones triés du plus pro-NORMAL au plus pro-PNEUMONIE
+  const sorted = contributions
+    .map((v, i) => ({ i, v }))
+    .sort((a, b) => a.v - b.v);
+
+  const values = sorted.map(x => parseFloat(x.v.toFixed(4)));
+  const colors = values.map(v =>
+    v > 0 ? 'rgba(252,165,165,0.85)' :
+    v < 0 ? 'rgba(134,239,172,0.85)' :
+            'rgba(45,45,90,0.5)');
+
+  const proPN = contributions.filter(v => v > 0).length;
+  const proNM = contributions.filter(v => v < 0).length;
+  const zero  = contributions.filter(v => v === 0).length;
+  document.getElementById('dense-count').textContent =
+    `${proPN} → PNEUMONIE · ${proNM} → NORMAL · ${zero} bloqués (ReLU=0)`;
+
+  const chartCfg = {
+    type: 'bar',
+    data: {
+      labels: sorted.map(x => `N${x.i + 1}`),
+      datasets: [{ data: values, backgroundColor: colors, borderWidth: 0, barPercentage: 1.0, categoryPercentage: 1.0 }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      animation: { duration: 400 },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: '#0c0c1e', borderColor: '#16163a', borderWidth: 1,
+          titleColor: '#94a3b8', bodyColor: '#e2e8f0', padding: 8,
+          callbacks: {
+            title: items => `Neurone ${items[0].label}`,
+            label: item => `${item.raw > 0 ? '+' : ''}${item.raw} → ${item.raw > 0 ? 'PNEUMONIE' : item.raw < 0 ? 'NORMAL' : 'bloqué'}`,
+          }
+        }
+      },
+      scales: {
+        x: {
+          grid: { display: false },
+          ticks: { display: false },
+          border: { color: '#16163a' },
+          title: { display: true, text: '← NORMAL · 128 neurones triés par contribution · PNEUMONIE →', color: '#3d3d6b', font: { size: 8 } }
+        },
+        y: {
+          grid: { color: '#111128', lineWidth: 0.5 },
+          ticks: { color: '#2d2d5a', font: { size: 8 }, maxTicksLimit: 5 },
+          border: { color: '#16163a' },
+          title: { display: true, text: 'Contribution au logit', color: '#3d3d6b', font: { size: 8 } }
+        }
+      }
+    }
+  };
+
+  if (denseChart) {
+    denseChart.data.labels = sorted.map(x => `N${x.i + 1}`);
+    denseChart.data.datasets[0].data = values;
+    denseChart.data.datasets[0].backgroundColor = colors;
+    denseChart.update();
+  } else {
+    const canvas = document.getElementById('dense-hist');
+    if (canvas) denseChart = new Chart(canvas.getContext('2d'), chartCfg);
+  }
+}
+
+// ── Modal feature map ──────────────────────────────────
+let _inputSrc = null;
+
+const FM_DESC = {
+  1: ['Conv 1', 'Patterns bas niveau : bords, gradients, contrastes locaux. Conv 64→62 (kernel 3×3, no padding).'],
+  2: ['Conv 2', 'Patterns haut niveau : combinaisons de bords détectés par Conv1, zones opaques, structures complexes caractéristiques de la pneumonie.'],
+};
+
+function openFmModal(layer, filterIdx, mapSrc) {
+  if (!_inputSrc || !mapSrc) return;
+  const [layerName, desc] = FM_DESC[layer];
+  document.getElementById('fm-modal-title').textContent = `${layerName} — Filtre ${filterIdx + 1} / ${layer === 1 ? 8 : 16}`;
+  document.getElementById('fm-modal-desc').textContent = desc;
+  document.getElementById('fm-modal').style.display = 'flex';
+
+  const S = 220;
+  const inputImg = new Image(), mapImg = new Image();
+
+  inputImg.onload = () => {
+    ['fm-cv-input','fm-cv-overlay'].forEach(id => {
+      const c = document.getElementById(id);
+      c.width = c.height = S;
+      c.getContext('2d').drawImage(inputImg, 0, 0, S, S);
+    });
+    if (mapImg.complete && mapImg.naturalWidth) blendOverlay(inputImg, mapImg, S);
+  };
+
+  mapImg.onload = () => {
+    const c = document.getElementById('fm-cv-map');
+    c.width = c.height = S;
+    c.getContext('2d').drawImage(mapImg, 0, 0, S, S);
+    if (inputImg.complete && inputImg.naturalWidth) blendOverlay(inputImg, mapImg, S);
+  };
+
+  inputImg.src = _inputSrc;
+  mapImg.src = mapSrc;
+}
+
+function blendOverlay(inputImg, mapImg, S) {
+  const c = document.getElementById('fm-cv-overlay');
+  const ctx = c.getContext('2d');
+  ctx.clearRect(0, 0, S, S);
+  ctx.globalAlpha = 1;
+  ctx.drawImage(inputImg, 0, 0, S, S);
+  ctx.globalAlpha = 0.62;
+  ctx.drawImage(mapImg, 0, 0, S, S);
+  ctx.globalAlpha = 1;
+}
+
+['fm1','fm2'].forEach((fmId, li) => {
+  document.getElementById(fmId).addEventListener('click', e => {
+    const img = e.target.closest('img');
+    if (!img || !img.src || img.src.endsWith('#') || !_inputSrc) return;
+    const idx = Array.from(img.parentElement.querySelectorAll('img')).indexOf(img);
+    openFmModal(li + 1, idx, img.src);
+  });
+});
+
+document.getElementById('fm-modal-close').addEventListener('click', () => {
+  document.getElementById('fm-modal').style.display = 'none';
+});
+document.getElementById('fm-modal').addEventListener('click', e => {
+  if (e.target === e.currentTarget) document.getElementById('fm-modal').style.display = 'none';
+});
+
+// État
+let selectedItem = null;
+
+// Charger les images de test
+fetch('/test-images').then(r => r.json()).then(images => {
+  const grid = document.getElementById('img-grid');
+  grid.innerHTML = '';
+  const countEl = document.getElementById('img-count');
+  if (countEl) countEl.textContent = images.length + ' images';
+  images.forEach(img => {
+    const item = document.createElement('div');
+    item.className = 'thumb-item';
+    item.innerHTML = `<img src="data:image/jpeg;base64,${img.thumb}" alt=""><div class="thumb-lbl ${img.label === 1 ? 'pn' : 'nm'}">${img.label === 1 ? 'PNEUMONIE' : 'NORMAL'}</div>`;
+    item.addEventListener('click', () => {
+      if (selectedItem) selectedItem.classList.remove('sel');
+      selectedItem = item;
+      item.classList.add('sel');
+      selectedItem._data = img;
+      document.getElementById('btn-run').disabled = false;
+      resetResult();
+    });
+    grid.appendChild(item);
+  });
+});
+
+
+const STAGE_IDS = ['stage-input','stage-conv1','stage-conv2','stage-dense','stage-result'];
+function litStage(id) { const el=document.getElementById(id); if(el) el.classList.add('lit'); }
+function resetLit()   { STAGE_IDS.forEach(id=>{const el=document.getElementById(id);if(el)el.classList.remove('lit');}); }
+
+function resetResult() {
+  resetLit();
+  _inputSrc = null;
+  document.getElementById('fm-modal').style.display = 'none';
+  document.getElementById('res-img').src = '';
+  document.getElementById('res-verdict').textContent = '—';
+  document.getElementById('res-verdict').style.color = '#374151';
+  document.getElementById('res-pct').textContent = '—';
+
+  document.getElementById('res-bar').style.width = '0%';
+  document.getElementById('true-label-box').textContent = '—';
+  document.getElementById('true-label-box').style.color = '#374151';
+  document.getElementById('verdict-box').textContent = '—';
+  document.getElementById('verdict-box').style.color = '#374151';
+  document.getElementById('logit-val').textContent = '—';
+  document.getElementById('fm1').querySelectorAll('img').forEach(img => img.src = '');
+  document.getElementById('fm2').querySelectorAll('img').forEach(img => img.src = '');
+  document.getElementById('dense-count').textContent = 'Top 16 neurones par contribution absolue';
+  if (denseChart) { denseChart.data.labels = []; denseChart.data.datasets[0].data = []; denseChart.update('none'); }
+}
+
+document.getElementById('btn-run').addEventListener('click', () => {
+  if (!selectedItem || !selectedItem._data) return;
+  const data = selectedItem._data;
+  document.getElementById('btn-run').disabled = true;
+  document.getElementById('s-msg').textContent = 'Analyse en cours…';
+  const dot = document.getElementById('status-dot');
+  if (dot) dot.className = 'status-dot running';
+  resetResult();
+  socket.emit('run_inference', { path: data.path, label: data.label });
+});
+
+socket.on('inference_result', d => {
+  const dot = document.getElementById('status-dot');
+  if (dot) dot.className = 'status-dot done';
+  document.getElementById('s-msg').textContent = 'Analyse terminée.';
+  document.getElementById('btn-run').disabled = false;
+
+  // Image d'entrée
+  _inputSrc = 'data:image/png;base64,' + d.input_image;
+  document.getElementById('res-img').src = _inputSrc;
+  litStage('stage-input');
+
+  // t=0 : Conv1
+  setTimeout(() => {
+    document.getElementById('fm1').querySelectorAll('img').forEach((img, i) => {
+      if (d.conv1_maps[i]) img.src = 'data:image/png;base64,' + d.conv1_maps[i];
+    });
+    litStage('stage-conv1');
+  }, 0);
+
+  // t=450 : Conv2
+  setTimeout(() => {
+    document.getElementById('fm2').querySelectorAll('img').forEach((img, i) => {
+      if (d.conv2_maps[i]) img.src = 'data:image/png;base64,' + d.conv2_maps[i];
+    });
+    litStage('stage-conv2');
+  }, 450);
+
+  // t=900 : Contributions
+  setTimeout(() => {
+    buildContribChart(d.contributions);
+    litStage('stage-dense');
+  }, 900);
+
+  // t=1350 : Résultat final
+  setTimeout(() => { litStage('stage-result'); }, 1300);
+  setTimeout(() => {
+    const p = d.prediction;
+    const pred = p >= 0.5;
+    const correct = pred === (d.true_label === 1);
+
+    document.getElementById('res-pct').textContent = (p * 100).toFixed(1) + '%';
+    document.getElementById('res-pct').style.color = pred ? '#fca5a5' : '#86efac';
+  
+    document.getElementById('logit-val').textContent = (d.logit !== undefined ? d.logit : (Math.log(p / (1 - p + 1e-7))).toFixed(3)).toString();
+
+    document.getElementById('res-bar').style.cssText =
+      `width:${p * 100}%;background:${pred ? '#dc2626' : '#16a34a'}`;
+
+    document.getElementById('res-verdict').textContent = pred ? 'PNEUMONIE' : 'NORMAL';
+    document.getElementById('res-verdict').style.color = pred ? '#fca5a5' : '#86efac';
+
+    const trueLabel = d.true_label === 1 ? 'PNEUMONIE' : 'NORMAL';
+    const trueLabelEl = document.getElementById('true-label-box');
+    trueLabelEl.textContent = trueLabel;
+    trueLabelEl.style.color = d.true_label === 1 ? '#fca5a5' : '#86efac';
+
+    const verdictEl = document.getElementById('verdict-box');
+    if (correct) {
+      verdictEl.textContent = 'Correct';
+      verdictEl.style.color = '#6ee7b7';
+    } else {
+      verdictEl.textContent = 'Incorrect';
+      verdictEl.style.color = '#f97316';
+    }
+  }, 1350);
+});
+
+socket.on('inference_error', d => {
+  const dot = document.getElementById('status-dot');
+  if (dot) dot.className = 'status-dot err';
+  document.getElementById('s-msg').textContent = '⚠ ' + d.message;
+  document.getElementById('btn-run').disabled = false;
+});
+</script>
+</body>
+</html>
