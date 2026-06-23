@@ -3,250 +3,208 @@
 <head>
 <meta charset="UTF-8">
 <title>CNN Pneumonie — Guide interactif</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    theme: { extend: { colors: {
+      ink: '#0b1220', ink2: '#0f172a', night: '#0b1220', night2: '#0f172a',
+      edge: '#16163a', accent: '#2563eb', accent2: '#2563eb',
+    } } }
+  };
+</script>
 <style>
-* { box-sizing: border-box; margin: 0; padding: 0; }
-html, body { height: 100%; overflow: hidden; }
-body { background: #0d1117; color: #e2e8f0; font-family: 'Segoe UI', system-ui, sans-serif; display: flex; flex-direction: column; }
-
-/* ══════════════════════════════════════════
-   GUIDE
-   ══════════════════════════════════════════ */
-#guide { flex: 1; display: flex; flex-direction: column; min-height: 0; }
-
-#guide-bar {
-  flex-shrink: 0; background: #161b22; border-bottom: 1px solid #21262d;
-  padding: 8px 20px; display: flex; align-items: center; justify-content: space-between;
+:root{
+  --bg:#F1F5F9; --surface:#FFFFFF; --surface2:#F8FAFC;
+  --line:#E2E8F0; --line2:#CBD5E1;
+  --text:#0F172A; --text2:#475569; --muted:#94A3B8;
+  --primary:#2563EB; --primary-d:#1D4ED8; --teal:#0D9488;
+  --green:#16A34A; --green-bg:#DCFCE7; --red:#E11D48; --red-bg:#FEE2E2; --amber:#D97706;
+  --figure:#0F172A;            /* fond des panneaux canvas (navy) */
+  --shadow:0 1px 2px rgba(15,23,42,.06), 0 8px 24px rgba(15,23,42,.06);
 }
-#guide-bar h1 { font-size: .92rem; font-weight: 700; color: #a78bfa; }
-#step-ctr { font-size: .78rem; color: #6e7681; }
-#btn-enter { background: #7c3aed; color: #fff; border: none; border-radius: 6px; padding: 6px 16px; font-size: .8rem; font-weight: 700; cursor: pointer; }
-
-/* Zone slides — prend tout l'espace restant */
-#slides-area { flex: 1; position: relative; min-height: 0; overflow: hidden; }
-
-/*
-  Chaque slide = grille CSS avec 4 rangées fixes :
-    1. tag         → auto (se réduit au contenu)
-    2. titre       → auto
-    3. canvas      → 1fr (prend TOUT l'espace restant)
-    4. description → auto
-  Plus jamais d'overlap.
-*/
-.slide {
-  display: none;
-  position: absolute; inset: 0;
-  grid-template-rows: auto auto 1fr auto;
-  grid-template-columns: 1fr;
-  row-gap: 10px;
-  padding: 14px 28px 10px;
-}
-.slide.active { display: grid; }
-
-.s-tag  { font-size: .67rem; font-weight: 700; text-transform: uppercase; letter-spacing: .11em; color: #a78bfa; text-align: center; }
-.s-title { font-size: 1.45rem; font-weight: 800; text-align: center; line-height: 1.25; }
-
-/* La cellule canvas prend tout l'espace disponible */
-.s-canvas { position: relative; min-height: 0; }
-/* Le canvas remplit exactement sa cellule */
-.s-canvas canvas { position: absolute; inset: 0; width: 100%; height: 100%; border-radius: 10px; background: #161b22; display: block; }
-
-.s-desc {
-  font-size: .88rem; color: #8b949e; line-height: 1.65;
-  text-align: center; max-width: 860px; margin: 0 auto;
-}
-.s-desc b { color: #c9d1d9; }
-.s-desc ul { display: inline-block; text-align: left; list-style: none; }
-.s-desc ul li { padding: 2px 0; }
-.s-desc ul li::before { content: '→ '; color: #a78bfa; }
-
-/* Barre de navigation en bas */
-#guide-nav {
-  flex-shrink: 0; background: #161b22; border-top: 1px solid #21262d;
-  padding: 9px 20px; display: flex; align-items: center; justify-content: center; gap: 18px;
-}
-.nav-btn { background: #21262d; border: 1px solid #30363d; color: #8b949e; border-radius: 6px; padding: 6px 18px; font-size: .8rem; cursor: pointer; }
-.nav-btn:hover:not(:disabled) { background: #30363d; color: #e2e8f0; }
-.nav-btn:disabled { opacity: .3; cursor: default; }
-.dots { display: flex; gap: 7px; }
-.dot { width: 8px; height: 8px; border-radius: 50%; background: #30363d; cursor: pointer; transition: background .2s; }
-.dot.on { background: #a78bfa; }
-
-/* ══════════════════════════════════════════
-   INFERENCE — Redesign
-   ══════════════════════════════════════════ */
-#training { flex: 1; display: none; flex-direction: column; min-height: 0; overflow: hidden; background: #07070f; }
-
-#train-bar {
-  flex-shrink: 0; background: #0c0c1e; border-bottom: 1px solid #16163a;
-  padding: 10px 22px; display: flex; align-items: center; justify-content: space-between;
-}
-#train-bar h1 { font-size: .92rem; font-weight: 700; color: #a78bfa; }
-.hb { padding: 7px 16px; border: none; border-radius: 8px; font-size: .76rem; font-weight: 700; cursor: pointer; transition: all .15s; }
-#btn-back { background: transparent; border: 1px solid #21213f; color: #64748b; }
-#btn-back:hover { background: #131328; color: #a78bfa; border-color: #3730a3; }
-
-/* Barre de statut */
-#infer-status {
-  flex-shrink: 0; background: #090914; border-bottom: 1px solid #0f0f26;
-  padding: 5px 22px; display: flex; align-items: center; gap: 8px; min-height: 26px;
-}
-.status-dot {
-  width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0;
-  background: #21213f; transition: background .3s, box-shadow .3s;
-}
-.status-dot.running { background: #a78bfa; box-shadow: 0 0 8px rgba(167,139,250,.7); animation: dot-pulse 1s ease-in-out infinite; }
-.status-dot.done    { background: #10b981; }
-.status-dot.err     { background: #ef4444; }
-@keyframes dot-pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
-#s-msg { font-size: .7rem; color: #3d3d6b; }
-
-/* Grid principal */
-#tgrid {
-  flex: 1; display: grid; grid-template-columns: 265px 1fr;
-  gap: 10px; padding: 10px; overflow: hidden; min-height: 0;
+*{box-sizing:border-box;margin:0;padding:0;}
+html{scroll-behavior:smooth;}
+body{
+  min-height:100dvh; overflow-x:hidden;
+  background:var(--bg); color:var(--text);
+  font-family:'Segoe UI',system-ui,sans-serif; display:flex; flex-direction:column;
 }
 
-/* ── Sélecteur ── */
-#col-select {
-  display: flex; flex-direction: column;
-  background: #0c0c1e; border: 1px solid #16163a; border-radius: 12px;
-  padding: 12px; gap: 8px; overflow: hidden;
+/* ════════ GUIDE ════════ */
+#guide{flex:1; min-height:100dvh; display:flex; flex-direction:column;}
+#guide-bar{
+  flex-shrink:0; background:rgba(255,255,255,.9); backdrop-filter:blur(8px);
+  border-bottom:1px solid var(--line);
+  padding:12px clamp(14px,3vw,28px);
+  display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap;
 }
-.panel-header { display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
-.panel-title { font-size: .58rem; font-weight: 700; text-transform: uppercase; letter-spacing: .12em; color: #2d2d5a; }
-#img-count { font-size: .6rem; font-weight: 700; color: #4a3a7a; background: #131328; padding: 2px 8px; border-radius: 8px; border: 1px solid #21213f; }
+#guide-bar h1{font-size:clamp(.85rem,1.7vw,1rem); font-weight:800; color:var(--primary); letter-spacing:-.01em;}
+#step-ctr{font-size:.78rem; color:var(--text2); font-weight:600;}
+#btn-enter{background:var(--primary); color:#fff; border:none; border-radius:9px; padding:8px 18px; font-size:.82rem; font-weight:700; cursor:pointer; transition:transform .15s, box-shadow .15s;}
+#btn-enter:hover{transform:translateY(-1px); box-shadow:0 8px 22px rgba(37,99,235,.35);}
 
-#img-grid {
-  display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px;
-  overflow-y: auto; flex: 1; min-height: 0; align-content: start;
-  scrollbar-width: thin; scrollbar-color: #21213f transparent;
+#slides-area{flex:1; position:relative; min-height:0; overflow:hidden;}
+.slide{
+  display:none; position:absolute; inset:0;
+  grid-template-rows:auto auto 1fr auto; grid-template-columns:1fr;
+  row-gap:clamp(6px,1.4vh,12px); padding:clamp(10px,2vh,18px) clamp(14px,3vw,32px);
 }
-#img-grid::-webkit-scrollbar { width: 4px; }
-#img-grid::-webkit-scrollbar-thumb { background: #21213f; border-radius: 2px; }
-
-.thumb-item {
-  cursor: pointer; border-radius: 7px; border: 2px solid transparent;
-  transition: all .14s; overflow: hidden; background: #111128;
+.slide.active{display:grid;}
+.s-tag{font-size:clamp(.6rem,1.2vw,.7rem); font-weight:800; text-transform:uppercase; letter-spacing:.12em; color:var(--primary); text-align:center;}
+.s-title{font-size:clamp(1.02rem,2.4vw,1.55rem); font-weight:800; text-align:center; line-height:1.25; max-width:1100px; margin:0 auto; color:var(--text);}
+.s-canvas{position:relative; min-height:0; display:flex; align-items:center; justify-content:center;}
+.s-canvas canvas{
+  position:static; display:block;
+  width:100%; max-width:1150px; height:100%; max-height:680px;
+  border-radius:16px; background:var(--figure);
+  box-shadow:var(--shadow); border:1px solid var(--line);
 }
-.thumb-item:hover { border-color: #3730a3; transform: scale(1.04); }
-.thumb-item.sel { border-color: #f59e0b; box-shadow: 0 0 0 3px rgba(245,158,11,.18), 0 0 14px rgba(245,158,11,.12); }
-.thumb-item img { width: 100%; aspect-ratio: 1; display: block; object-fit: cover; }
-.thumb-lbl { font-size: .5rem; text-align: center; padding: 2px 0; font-weight: 700; letter-spacing: .04em; }
-.thumb-lbl.pn { color: #fca5a5; background: rgba(220,38,38,.2); }
-.thumb-lbl.nm { color: #86efac; background: rgba(22,163,74,.2); }
+.s-desc{font-size:clamp(.74rem,1.5vw,.92rem); color:var(--text2); line-height:1.6; text-align:center; max-width:880px; margin:0 auto;}
+.s-desc b{color:var(--text); font-weight:700;}
+.s-desc ul{display:inline-block; text-align:left; list-style:none;}
+.s-desc ul li{padding:2px 0;}
+.s-desc ul li::before{content:'→ '; color:var(--primary);}
 
-.sel-btn {
-  width: 100%; padding: 10px;
-  background: linear-gradient(135deg, #7c3aed, #5b21b6);
-  color: #fff; border: none; border-radius: 9px;
-  font-size: .85rem; font-weight: 700; cursor: pointer; flex-shrink: 0; transition: all .15s;
+#guide-nav{flex-shrink:0; background:var(--surface); border-top:1px solid var(--line); padding:10px 20px; display:flex; align-items:center; justify-content:center; gap:18px; flex-wrap:wrap;}
+.nav-btn{background:var(--surface); border:1px solid var(--line2); color:var(--text2); border-radius:8px; padding:7px 18px; font-size:.8rem; font-weight:600; cursor:pointer; transition:all .15s;}
+.nav-btn:hover:not(:disabled){background:var(--surface2); color:var(--text); border-color:var(--primary);}
+.nav-btn:disabled{opacity:.4; cursor:default;}
+.dots{display:flex; gap:7px;}
+.dot{width:8px; height:8px; border-radius:50%; background:var(--line2); cursor:pointer; transition:background .2s;}
+.dot.on{background:var(--primary);}
+
+/* ════════ LAB (dashboard) ════════ */
+#training{flex:1; display:none; flex-direction:column; min-height:100dvh; overflow-y:auto; background:var(--bg);}
+#train-bar{flex-shrink:0; background:rgba(255,255,255,.92); backdrop-filter:blur(8px); border-bottom:1px solid var(--line); padding:12px clamp(14px,3vw,28px); display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap;}
+#train-bar h1{font-size:clamp(.85rem,1.7vw,1rem); font-weight:800; color:var(--primary);}
+.hb{padding:8px 16px; border:none; border-radius:9px; font-size:.78rem; font-weight:700; cursor:pointer; transition:all .15s;}
+#btn-back{background:var(--surface); border:1px solid var(--line2); color:var(--text2);}
+#btn-back:hover{background:var(--surface2); color:var(--primary); border-color:var(--primary);}
+
+#infer-status{flex-shrink:0; background:#EFF6FF; border-bottom:1px solid var(--line); padding:7px clamp(14px,3vw,28px); display:flex; align-items:center; gap:9px; min-height:30px; flex-wrap:wrap;}
+.status-dot{width:8px; height:8px; border-radius:50%; flex-shrink:0; background:var(--line2); transition:background .3s, box-shadow .3s;}
+.status-dot.running{background:var(--primary); box-shadow:0 0 8px rgba(37,99,235,.6); animation:dot-pulse 1s ease-in-out infinite;}
+.status-dot.done{background:var(--green);}
+.status-dot.err{background:var(--red);}
+@keyframes dot-pulse{0%,100%{opacity:1}50%{opacity:.3}}
+#s-msg{font-size:.74rem; color:var(--text2); font-weight:500;}
+
+/* Grille dashboard */
+#tgrid{
+  width:100%; max-width:1500px; margin:0 auto; padding:clamp(12px,2vw,20px);
+  display:grid; gap:14px;
+  grid-template-columns:repeat(3,1fr);
+  grid-template-areas:"radios diag origin" "maps maps details";
 }
-.sel-btn:hover:not(:disabled) { background: linear-gradient(135deg,#6d28d9,#4c1d95); transform: translateY(-1px); box-shadow: 0 8px 24px rgba(124,58,237,.4); }
-.sel-btn:active:not(:disabled) { transform: translateY(0); box-shadow: none; }
-.sel-btn:disabled { background: #111128; color: #252550; cursor: default; }
+#card-radios{grid-area:radios;} #card-diag{grid-area:diag;} #card-origin{grid-area:origin;}
+#card-maps{grid-area:maps;} #card-details{grid-area:details;}
 
-/* ── Pipeline — 2 rangées ── */
-#pipeline { display: grid; grid-template-rows: 1fr 1fr; gap: 8px; min-height: 0; overflow: hidden; }
-
-.pipe-row { display: flex; flex-direction: row; align-items: stretch; overflow: hidden; min-height: 0; }
-
-.stage {
-  flex: 1; display: flex; flex-direction: column; align-items: center;
-  background: #0c0c1e; border: 1px solid #16163a; border-radius: 12px;
-  padding: 10px 8px 8px; overflow: hidden; min-width: 0;
-  transition: border-color .3s, box-shadow .3s;
+.card{
+  background:var(--surface); border:1px solid var(--line); border-radius:16px;
+  padding:16px; box-shadow:var(--shadow); display:flex; flex-direction:column; min-width:0;
+  transition:border-color .25s, box-shadow .25s;
 }
-.stage-input  { flex: .72; }
-.stage-result { flex: .75; }
-#stage-dense  { flex: 2; }
-.stage.lit { border-color: #2d2a5e; box-shadow: 0 0 0 1px #2d2a5e, 0 0 20px rgba(139,92,246,.15); }
+.card.lit{border-color:var(--primary); box-shadow:0 0 0 3px rgba(37,99,235,.12), var(--shadow);}
+.card-hd{display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:12px;}
+.card-title{font-size:.66rem; font-weight:800; text-transform:uppercase; letter-spacing:.1em; color:var(--text2);}
+#img-count{font-size:.62rem; font-weight:700; color:var(--primary); background:#EFF6FF; padding:3px 9px; border-radius:999px; border:1px solid #BFDBFE;}
 
-.stage-badge {
-  font-size: .6rem; font-weight: 700; text-transform: uppercase; letter-spacing: .08em;
-  color: #8b5cf6; background: #100d28; border: 1px solid #262058;
-  padding: 4px 12px; border-radius: 16px; flex-shrink: 0; white-space: nowrap;
+#img-grid{display:grid; grid-template-columns:repeat(3,1fr); gap:6px; overflow-y:auto; max-height:230px; align-content:start; scrollbar-width:thin; scrollbar-color:var(--line2) transparent;}
+#img-grid::-webkit-scrollbar{width:6px;} #img-grid::-webkit-scrollbar-thumb{background:var(--line2); border-radius:3px;}
+.thumb-item{cursor:pointer; border-radius:9px; border:2px solid transparent; transition:all .14s; overflow:hidden; background:var(--surface2);}
+.thumb-item:hover{border-color:var(--primary); transform:scale(1.04);}
+.thumb-item.sel{border-color:var(--amber); box-shadow:0 0 0 3px rgba(217,119,6,.2);}
+.thumb-item img{width:100%; aspect-ratio:1; display:block; object-fit:cover;}
+.thumb-lbl{font-size:.5rem; text-align:center; padding:3px 0; font-weight:800; letter-spacing:.04em;}
+.thumb-lbl.pn{color:#B91C1C; background:var(--red-bg);}
+.thumb-lbl.nm{color:#15803D; background:var(--green-bg);}
+
+.col-sep{display:flex; align-items:center; gap:8px; color:var(--muted); font-size:.56rem; font-weight:700; letter-spacing:.1em; margin:12px 0 8px;}
+.col-sep::before,.col-sep::after{content:''; flex:1; height:1px; background:var(--line);}
+#upload-zone{border:1.5px dashed var(--line2); border-radius:11px; padding:12px 8px; text-align:center; cursor:pointer; transition:all .15s;}
+#upload-zone:hover,#upload-zone.drag{border-color:var(--primary); background:#EFF6FF;}
+.uz-main{font-size:.7rem; color:var(--primary); font-weight:700;}
+.uz-sub{font-size:.56rem; color:var(--muted); margin-top:2px;}
+.sel-btn{width:100%; margin-top:12px; padding:11px; background:var(--primary); color:#fff; border:none; border-radius:11px; font-size:.88rem; font-weight:700; cursor:pointer; transition:all .15s;}
+.sel-btn:hover:not(:disabled){background:var(--primary-d); transform:translateY(-1px); box-shadow:0 8px 24px rgba(37,99,235,.35);}
+.sel-btn:disabled{background:var(--line); color:var(--muted); cursor:default;}
+
+/* Diagnostic */
+#card-diag{align-items:center; text-align:center;}
+#card-diag .card-hd{width:100%;}
+#res-verdict{font-size:clamp(1.1rem,2.6vw,1.5rem); font-weight:900; color:var(--muted); letter-spacing:.04em; margin-top:6px;}
+#res-pct{font-size:clamp(2rem,5vw,3rem); font-weight:900; color:var(--text); line-height:1.05;}
+#res-label{font-size:.6rem; color:var(--muted); margin-bottom:8px;}
+#res-bar-bg{width:100%; height:9px; background:var(--surface2); border-radius:5px; overflow:hidden; border:1px solid var(--line); margin-top:8px;}
+#res-bar{height:100%; width:0%; border-radius:5px; transition:width .8s cubic-bezier(.4,0,.2,1), background .4s;}
+#res-score{display:flex; justify-content:space-between; font-size:.56rem; color:var(--muted); width:100%; margin-top:4px; font-weight:600;}
+#res-conf{font-size:.66rem; text-align:center; margin-top:12px; color:var(--text2);}
+#res-conf b{font-weight:800;}
+#res-explain{font-size:.64rem; text-align:center; margin-top:10px; line-height:1.5; padding:8px 11px; border-radius:9px;}
+
+/* Origine */
+.ro-title{font-size:.56rem; color:var(--muted); text-transform:uppercase; letter-spacing:.08em; margin-bottom:10px; font-weight:700;}
+.ro-row{display:flex; align-items:center; gap:8px; margin:8px 0;}
+.ro-lbl{font-size:.66rem; width:70px; color:var(--text2); text-align:right; flex-shrink:0; font-weight:600;}
+.ro-bar-bg{flex:1; height:12px; background:var(--surface2); border:1px solid var(--line); border-radius:6px; overflow:hidden;}
+.ro-bar{height:100%; width:0; border-radius:6px; transition:width .6s cubic-bezier(.4,0,.2,1);}
+.ro-pct{font-size:.66rem; width:38px; color:var(--text); flex-shrink:0; font-weight:800;}
+#card-origin .ro-hint{font-size:.58rem; color:var(--muted); margin-top:auto; padding-top:10px; line-height:1.5;}
+
+/* Cartes d'activation */
+.maps-top{display:flex; align-items:center; gap:12px; margin-bottom:12px;}
+#res-img{width:74px; height:74px; object-fit:contain; image-rendering:pixelated; border-radius:9px; border:1px solid var(--line); background:var(--figure); flex-shrink:0;}
+.maps-input-cap{font-size:.62rem; color:var(--text2); line-height:1.5;}
+.maps-input-cap b{color:var(--text);}
+.maps-block{margin-bottom:12px;}
+.maps-block:last-child{margin-bottom:0;}
+.maps-block-hd{font-size:.6rem; font-weight:700; color:var(--text2); margin-bottom:6px; display:flex; justify-content:space-between;}
+#fm1,#fm2{display:grid; grid-template-columns:repeat(8,1fr); gap:5px;}
+#fm1 img,#fm2 img{width:100%; aspect-ratio:1; image-rendering:pixelated; border-radius:5px; background:var(--figure); border:1px solid var(--line); cursor:pointer; transition:border-color .12s, transform .1s;}
+#fm1 img:hover,#fm2 img:hover{border-color:var(--primary); transform:scale(1.08);}
+.fm-hint{font-size:.56rem; color:var(--muted); text-align:center; margin-top:8px;}
+.dim-badge{font-size:.58rem; font-weight:700; color:var(--primary); background:#EFF6FF; border:1px solid #BFDBFE; padding:2px 8px; border-radius:6px;}
+
+/* Détails */
+#dense-hist-wrap{position:relative; width:100%; height:150px; margin-bottom:10px;}
+#dense-count{font-size:.62rem; color:var(--text2); text-align:center; margin-bottom:12px;}
+#res-truth{width:100%; background:var(--surface2); border:1px solid var(--line); border-radius:10px; padding:8px 14px;}
+.rt-row{display:flex; justify-content:space-between; align-items:center; padding:6px 0;}
+.rt-row+.rt-row{border-top:1px solid var(--line);}
+.rt-k{font-size:.66rem; color:var(--text2);}
+.rt-v{font-size:.82rem; font-weight:800; color:var(--text);}
+
+/* ════════ Modal feature map ════════ */
+#fm-modal{position:fixed; inset:0; background:rgba(15,23,42,.55); display:none; align-items:center; justify-content:center; z-index:1000; backdrop-filter:blur(4px);}
+.fm-modal-card{background:var(--surface); border:1px solid var(--line); border-radius:16px; padding:22px; max-width:780px; width:92%; box-shadow:0 20px 60px rgba(15,23,42,.25);}
+.fm-modal-hd{display:flex; align-items:center; justify-content:space-between; margin-bottom:16px;}
+#fm-modal-title{font-size:.95rem; font-weight:800; color:var(--primary);}
+#fm-modal-close{background:var(--surface2); border:1px solid var(--line2); color:var(--text2); border-radius:8px; width:30px; height:30px; cursor:pointer; font-size:1.1rem; line-height:1; transition:all .15s;}
+#fm-modal-close:hover{background:var(--line); color:var(--text);}
+.fm-modal-cols{display:grid; grid-template-columns:repeat(3,1fr); gap:14px;}
+.fm-modal-col{display:flex; flex-direction:column; gap:6px;}
+.fm-modal-lbl{font-size:.62rem; font-weight:700; text-transform:uppercase; letter-spacing:.08em; color:var(--text2); text-align:center;}
+.fm-modal-col canvas{width:100%!important; aspect-ratio:1; border-radius:10px; border:1px solid var(--line); display:block; image-rendering:pixelated; background:var(--figure);}
+#fm-modal-desc{margin-top:14px; font-size:.74rem; color:var(--text2); text-align:center; line-height:1.6; padding:11px 14px; background:var(--surface2); border-radius:10px; border:1px solid var(--line);}
+.fm-cmap-bar{display:flex; align-items:center; gap:8px; margin-top:10px;}
+.fm-cmap-gradient{flex:1; height:8px; border-radius:4px; background:linear-gradient(to right,#000004,#56106e,#bb3754,#f98c09,#fcffa4);}
+.fm-cmap-label{font-size:.58rem; color:var(--muted); white-space:nowrap;}
+
+/* ════════ Responsive ════════ */
+@media (max-width:980px){
+  #tgrid{grid-template-columns:1fr; max-width:560px; grid-template-areas:"radios" "diag" "origin" "maps" "details";}
+  #img-grid{max-height:200px;}
 }
-.stage-content {
-  flex: 1; display: flex; align-items: center; justify-content: center;
-  width: 100%; min-height: 0; overflow: hidden; margin: 7px 0 3px;
+@media (max-width:620px){
+  #slides-area{position:static; overflow:visible;}
+  .slide{position:relative; inset:auto; min-height:72vh;}
+  .slide:not(.active){display:none;}
+  .s-canvas canvas{max-height:52vh;}
+  #fm1,#fm2{grid-template-columns:repeat(4,1fr);}
 }
-.stage-desc { font-size: .56rem; color: #2d2d52; text-align: center; line-height: 1.55; flex-shrink: 0; padding: 0 2px; }
-.stage-desc b { color: #3d3d6b; }
-
-.pipe-arrow { display: flex; flex-direction: column; align-items: center; justify-content: center; flex-shrink: 0; width: 26px; gap: 3px; }
-.pipe-arrow-line { font-size: .9rem; color: #1a1a38; }
-.pipe-arrow-label { font-size: .43rem; color: #1a1a38; text-align: center; line-height: 1.4; }
-
-/* Entrée */
-.stage-input .stage-content { position: relative; padding: 0; }
-#res-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; image-rendering: pixelated; border-radius: 6px; display: block; }
-
-/* Feature maps */
-#fm1, #fm2 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 3px; width: 100%; }
-#fm1 img, #fm2 img {
-  width: 100%; aspect-ratio: 1; image-rendering: pixelated; border-radius: 3px;
-  background: #07070f; border: 1px solid #111128;
-  cursor: pointer; transition: border-color .12s, transform .1s;
-}
-#fm1 img:hover, #fm2 img:hover { border-color: #8b5cf6; transform: scale(1.06); }
-.fm-legend { font-size: .48rem; color: #3d3d6b; text-align: center; margin-top: 3px; flex-shrink: 0; }
-.fm-hint { font-size: .46rem; color: #2d2d5a; text-align: center; margin-top: 2px; flex-shrink: 0; }
-.dim-badge { font-size: .52rem; font-weight: 700; color: #4a3a7a; background: #0e0e1c; border: 1px solid #16163a; padding: 2px 7px; border-radius: 5px; flex-shrink: 0; margin-top: 3px; }
-
-/* ── Modal feature map ── */
-#fm-modal {
-  position: fixed; inset: 0; background: rgba(0,0,0,.88);
-  display: none; align-items: center; justify-content: center;
-  z-index: 1000; backdrop-filter: blur(6px);
-}
-.fm-modal-card {
-  background: #0c0c1e; border: 1px solid #2d2a5e; border-radius: 14px;
-  padding: 20px 22px; max-width: 780px; width: 92%;
-  box-shadow: 0 0 60px rgba(139,92,246,.2);
-}
-.fm-modal-hd { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
-#fm-modal-title { font-size: .9rem; font-weight: 700; color: #a78bfa; }
-#fm-modal-close {
-  background: #131328; border: 1px solid #21213f; color: #64748b;
-  border-radius: 6px; width: 28px; height: 28px; cursor: pointer;
-  font-size: 1.1rem; line-height: 1; transition: all .15s;
-}
-#fm-modal-close:hover { background: #21213f; color: #e2e8f0; }
-.fm-modal-cols { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
-.fm-modal-col { display: flex; flex-direction: column; gap: 6px; }
-.fm-modal-lbl { font-size: .6rem; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: #3d3d6b; text-align: center; }
-.fm-modal-col canvas { width: 100% !important; aspect-ratio: 1; border-radius: 8px; border: 1px solid #16163a; display: block; image-rendering: pixelated; }
-#fm-modal-desc { margin-top: 14px; font-size: .72rem; color: #64748b; text-align: center; line-height: 1.65; padding: 10px 14px; background: #07070f; border-radius: 8px; border: 1px solid #111128; }
-.fm-cmap-bar { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
-.fm-cmap-gradient { flex: 1; height: 8px; border-radius: 4px; background: linear-gradient(to right, #000004, #56106e, #bb3754, #f98c09, #fcffa4); }
-.fm-cmap-label { font-size: .55rem; color: #2d2d5a; white-space: nowrap; }
-
-/* Dense — histogramme */
-#stage-dense .stage-content { align-items: stretch; padding: 0; }
-#dense-hist-wrap { position: relative; width: 100%; height: 100%; }
-#dense-count { font-size: .6rem; font-weight: 600; color: #4a3a7a; text-align: center; flex-shrink: 0; margin-top: 2px; }
-
-/* Preprocessing chain */
-.preproc-chain { display: flex; align-items: center; gap: 3px; flex-shrink: 0; justify-content: center; margin-bottom: 3px; flex-wrap: wrap; }
-.pp-chip { font-size: .52rem; font-weight: 700; color: #2d2d5a; background: #0e0e1c; border: 1px solid #16163a; padding: 2px 6px; border-radius: 5px; }
-.pp-chip.hi { color: #8b5cf6; border-color: #262058; background: #100d28; }
-.pp-sep { font-size: .55rem; color: #1a1a38; }
-
-/* Résultat — éléments directs du stage (flex col) */
-.res-spacer { flex: 1; }
-#res-verdict { font-size: 1.45rem; font-weight: 900; text-align: center; color: #374151; flex-shrink: 0; letter-spacing: .06em; }
-#res-pct { font-size: 2.8rem; font-weight: 900; text-align: center; color: #e2e8f0; line-height: 1.05; flex-shrink: 0; }
-#res-label { font-size: .55rem; color: #374151; text-align: center; flex-shrink: 0; margin-bottom: 8px; }
-#res-bar-bg { width: 100%; height: 7px; background: #07070f; border-radius: 4px; overflow: hidden; border: 1px solid #16163a; flex-shrink: 0; }
-#res-bar { height: 100%; width: 0%; border-radius: 4px; transition: width .8s cubic-bezier(.4,0,.2,1), background .4s; }
-#res-score { display: flex; justify-content: space-between; font-size: .52rem; color: #252550; width: 100%; flex-shrink: 0; margin-top: 3px; }
-#res-truth { width: 100%; background: #07070f; border: 1px solid #16163a; border-radius: 8px; padding: 7px 12px; margin-top: 10px; flex-shrink: 0; }
-.rt-row { display: flex; justify-content: space-between; align-items: center; padding: 4px 0; }
-.rt-row + .rt-row { border-top: 1px solid #111128; }
-.rt-k { font-size: .6rem; color: #374151; }
-.rt-v { font-size: .78rem; font-weight: 700; }
 </style>
 </head>
 <body>
@@ -261,8 +219,21 @@ body { background: #0d1117; color: #e2e8f0; font-family: 'Segoe UI', system-ui, 
 
   <div id="slides-area">
 
+    <!-- S0 : Contexte — le problème & les données -->
+    <div class="slide active" id="sIntro">
+      <div class="s-tag">Étape 0 — Le problème & les données</div>
+      <div class="s-title">Aider à diagnostiquer la pneumonie à partir de radios thoraciques</div>
+      <div class="s-canvas"><canvas id="cvIntro"></canvas></div>
+      <div class="s-desc">
+        On dispose de <b>5 856 radiographies</b> étiquetées par des médecins.
+        Objectif : entraîner un réseau à distinguer <b>NORMAL</b> de <b>PNEUMONIE</b>.
+        Difficulté clé : le jeu est <b>déséquilibré</b> (~3× plus de pneumonies),
+        et chaque pneumonie a une origine <b>virale</b> ou <b>bactérienne</b> — qu'on prédira aussi à la fin.
+      </div>
+    </div>
+
     <!-- S1 : Image = matrice -->
-    <div class="slide active" id="s1">
+    <div class="slide" id="s1">
       <div class="s-tag">Étape 1 — Les données d'entrée</div>
       <div class="s-title">Une radiographie est une matrice de valeurs numériques</div>
       <div class="s-canvas"><canvas id="cv1"></canvas></div>
@@ -347,6 +318,45 @@ body { background: #0d1117; color: #e2e8f0; font-family: 'Segoe UI', system-ui, 
       </div>
     </div>
 
+    <!-- S8 : Évaluation -->
+    <div class="slide" id="sEval">
+      <div class="s-tag">Étape 8 — Comment on évalue le modèle</div>
+      <div class="s-title">Train / Validation / Test et la matrice de confusion</div>
+      <div class="s-canvas"><canvas id="cvEval"></canvas></div>
+      <div class="s-desc">
+        Les données sont séparées : <b>train</b> (apprendre), <b>validation</b> (régler les hyperparamètres),
+        <b>test</b> (mesure finale et honnête, jamais vue à l'entraînement).
+        La <b>matrice de confusion</b> sur le test révèle les erreurs : ici un <b>recall très élevé</b>
+        (peu de pneumonies ratées), au prix de quelques fausses alertes — le bon compromis en médecine.
+      </div>
+    </div>
+
+    <!-- S9 : ROC-AUC -->
+    <div class="slide" id="sRoc">
+      <div class="s-tag">Étape 9 — La métrique ROC-AUC</div>
+      <div class="s-title">Une mesure indépendante du seuil et du déséquilibre</div>
+      <div class="s-canvas"><canvas id="cvRoc"></canvas></div>
+      <div class="s-desc">
+        La courbe <b>ROC</b> trace le taux de vrais positifs contre les faux positifs pour <b>tous les seuils</b>.
+        L'<b>AUC</b> (aire sous la courbe) résume le pouvoir discriminant : <b>0.5</b> = hasard, <b>1.0</b> = parfait.
+        Notre modèle atteint <b>AUC ≈ 0.92</b>. Avantage clé : contrairement à l'accuracy,
+        l'AUC n'est pas trompée par le déséquilibre des classes.
+      </div>
+    </div>
+
+    <!-- S10 : Origine 3 classes -->
+    <div class="slide" id="sOrigin">
+      <div class="s-tag">Étape 10 — Aller plus loin : l'origine de la pneumonie</div>
+      <div class="s-title">3 classes : NORMAL / VIRUS / BACTÉRIE (sortie Softmax)</div>
+      <div class="s-canvas"><canvas id="cvOrigin"></canvas></div>
+      <div class="s-desc">
+        On remplace la sortie <b>Sigmoid</b> (1 probabilité) par un <b>Softmax</b> à 3 neurones
+        (3 probabilités qui somment à 1). Tâche <b>plus difficile</b> : virus et bactérie
+        produisent des images proches. Le modèle atteint <b>~69 %</b> d'accuracy (AUC macro ≈ 0.88) —
+        testable en direct dans le lab.
+      </div>
+    </div>
+
   </div><!-- /slides-area -->
 
   <div id="guide-nav">
@@ -370,102 +380,66 @@ body { background: #0d1117; color: #e2e8f0; font-family: 'Segoe UI', system-ui, 
 
   <div id="tgrid">
 
-    <!-- Sélecteur -->
-    <div id="col-select">
-      <div class="panel-header">
-        <div class="panel-title">Radios du test set</div>
-        <span id="img-count"></span>
-      </div>
+    <!-- RADIOS -->
+    <section class="card" id="card-radios">
+      <div class="card-hd"><span class="card-title">Radios — test set</span><span id="img-count"></span></div>
       <div id="img-grid"></div>
+      <div class="col-sep">OU VOTRE RADIO</div>
+      <div id="upload-zone">
+        <div class="uz-main">⇪ Déposez une radio</div>
+        <div class="uz-sub">ou cliquez pour choisir un fichier image</div>
+        <input type="file" id="upload-input" accept="image/*" hidden>
+      </div>
       <button class="sel-btn" id="btn-run" disabled>Analyser →</button>
-    </div>
+    </section>
 
-    <!-- Pipeline en 2 rangées -->
-    <div id="pipeline">
+    <!-- DIAGNOSTIC -->
+    <section class="card" id="card-diag">
+      <div class="card-hd"><span class="card-title">Diagnostic</span></div>
+      <div id="res-verdict">—</div>
+      <div id="res-pct">—</div>
+      <div id="res-bar-bg"><div id="res-bar"></div></div>
+      <div id="res-score"><span>NORMAL</span><span>PNEUMONIE</span></div>
+      <div id="res-conf">—</div>
+      <div id="res-explain" style="display:none"></div>
+    </section>
 
-      <!-- Rangée 1 : extraction de features -->
-      <div class="pipe-row">
+    <!-- ORIGINE -->
+    <section class="card" id="card-origin">
+      <div class="card-hd"><span class="card-title">Origine probable</span></div>
+      <div id="res-origin" style="display:none"><div id="ro-rows"></div></div>
+      <div class="ro-hint">Modèle 3 classes (Softmax). Virus et bactérie sont radiologiquement proches&nbsp;: souvent confondus.</div>
+    </section>
 
-        <div class="stage stage-input" id="stage-input">
-          <div class="stage-badge">Entrée — Preprocessing</div>
-          <div class="stage-content"><img id="res-img" src="" alt=""></div>
-          <div class="preproc-chain">
-            <span class="pp-chip">RGB</span><span class="pp-sep">→</span>
-            <span class="pp-chip hi">Gris</span><span class="pp-sep">→</span>
-            <span class="pp-chip hi">64×64</span><span class="pp-sep">→</span>
-            <span class="pp-chip hi">÷ 255</span>
-          </div>
-          <div class="stage-desc"><b>1 canal · 64×64 · [0.0, 1.0]</b></div>
-        </div>
+    <!-- CARTES D'ACTIVATION -->
+    <section class="card" id="card-maps">
+      <div class="card-hd"><span class="card-title">Cartes d'activation (Conv)</span></div>
+      <div class="maps-top">
+        <img id="res-img" src="" alt="">
+        <div class="maps-input-cap"><b>Entrée prétraitée</b><br>niveaux de gris · 64×64 · normalisée [0,1]</div>
+      </div>
+      <div class="maps-block">
+        <div class="maps-block-hd"><span>Conv 1 — 8 filtres 3×3</span><span class="dim-badge">→ 31×31×8</span></div>
+        <div id="fm1"><img alt=""><img alt=""><img alt=""><img alt=""><img alt=""><img alt=""><img alt=""><img alt=""></div>
+      </div>
+      <div class="maps-block">
+        <div class="maps-block-hd"><span>Conv 2 — 8 filtres (sur 16)</span><span class="dim-badge">→ 14×14×16</span></div>
+        <div id="fm2"><img alt=""><img alt=""><img alt=""><img alt=""><img alt=""><img alt=""><img alt=""><img alt=""></div>
+      </div>
+      <div class="fm-hint">Cliquer une carte pour la superposer à la radio · clair = activation forte</div>
+    </section>
 
-        <div class="pipe-arrow">
-          <div class="pipe-arrow-line">→</div>
-          <div class="pipe-arrow-label">8 filtres<br>3×3<br>+ ReLU</div>
-        </div>
-
-        <div class="stage" id="stage-conv1">
-          <div class="stage-badge">Conv 1 — 8 filtres 3×3</div>
-          <div class="stage-content">
-            <div id="fm1"><img alt=""><img alt=""><img alt=""><img alt=""><img alt=""><img alt=""><img alt=""><img alt=""></div>
-          </div>
-          <div class="fm-legend">Jaune = pattern fortement détecté &nbsp;·&nbsp; Noir = ReLU a tout bloqué (pattern absent sur cette radio)</div>
-          <div class="fm-legend" style="margin-top:2px">8 filtres aux poids différents → chacun cherche un pattern distinct (bords, contrastes, textures…)</div>
-          <div class="dim-badge" style="text-align:center">62×62×8 → Pool → 31×31×8</div>
-          <div class="fm-hint">↑ Cliquer pour superposer à la radio</div>
-        </div>
-
-        <div class="pipe-arrow">
-          <div class="pipe-arrow-line">→</div>
-          <div class="pipe-arrow-label">Pool 2×2<br>16 filtres<br>+ ReLU</div>
-        </div>
-
-        <div class="stage" id="stage-conv2">
-          <div class="stage-badge">Conv 2 — 16 filtres 3×3</div>
-          <div class="stage-content">
-            <div id="fm2"><img alt=""><img alt=""><img alt=""><img alt=""><img alt=""><img alt=""><img alt=""><img alt=""></div>
-          </div>
-          <div class="fm-legend">16 filtres 3×3×8 combinant les sorties de Conv1 → détectent des structures complexes (opacités, infiltrats)</div>
-          <div class="fm-legend" style="margin-top:2px">Jaune = structure fortement détectée &nbsp;·&nbsp; Noir = pattern combiné absent ici</div>
-          <div class="dim-badge" style="text-align:center">29×29×16 → Pool → 14×14×16 → Flatten → 3136</div>
-          <div class="fm-hint">↑ Cliquer pour superposer à la radio</div>
-        </div>
-
-      </div><!-- /pipe-row 1 -->
-
-      <!-- Rangée 2 : interprétation -->
-      <div class="pipe-row">
-
-        <div class="stage" id="stage-dense">
-          <div class="stage-badge">Dense — Contributions au diagnostic</div>
-          <div class="stage-content">
-            <div id="dense-hist-wrap"><canvas id="dense-hist"></canvas></div>
-          </div>
-          <div id="dense-count">Top 16 neurones par contribution absolue</div>
-        </div>
-
-        <div class="pipe-arrow">
-          <div class="pipe-arrow-line">→</div>
-          <div class="pipe-arrow-label">Dense2<br>Sigmoid</div>
-        </div>
-
-        <div class="stage stage-result" id="stage-result">
-          <div class="stage-badge">Diagnostic</div>
-          <div class="res-spacer"></div>
-          <div id="res-verdict">—</div>
-          <div id="res-pct">—</div>
-          <div id="res-bar-bg" style="margin-top:6px"><div id="res-bar"></div></div>
-          <div id="res-score"><span>NORMAL</span><span>PNEUMONIE</span></div>
-          <div id="res-truth">
-            <div class="rt-row"><span class="rt-k">Logit</span><span class="rt-v" style="color:#8b5cf6" id="logit-val">—</span></div>
-            <div class="rt-row"><span class="rt-k">Vrai label</span><span class="rt-v" id="true-label-box">—</span></div>
-            <div class="rt-row"><span class="rt-k">Verdict</span><span class="rt-v" id="verdict-box">—</span></div>
-          </div>
-          <div class="res-spacer"></div>
-        </div>
-
-      </div><!-- /pipe-row 2 -->
-
-    </div><!-- /pipeline -->
+    <!-- DÉTAILS -->
+    <section class="card" id="card-details">
+      <div class="card-hd"><span class="card-title">Détails techniques</span></div>
+      <div id="dense-hist-wrap"><canvas id="dense-hist"></canvas></div>
+      <div id="dense-count">128 neurones triés par contribution</div>
+      <div id="res-truth">
+        <div class="rt-row"><span class="rt-k">Logit</span><span class="rt-v" id="logit-val">—</span></div>
+        <div class="rt-row"><span class="rt-k">Vrai label</span><span class="rt-v" id="true-label-box">—</span></div>
+        <div class="rt-row"><span class="rt-k">Verdict</span><span class="rt-v" id="verdict-box">—</span></div>
+      </div>
+    </section>
 
   </div><!-- /tgrid -->
 </div>
@@ -504,9 +478,12 @@ body { background: #0d1117; color: #e2e8f0; font-family: 'Segoe UI', system-ui, 
 // ════════════════════════════════════════════════════════
 //  GUIDE — navigation
 // ════════════════════════════════════════════════════════
-const N = 7;
+// Ordre logique des slides (ids DOM). Le guide raconte toute l'histoire :
+// contexte → mécanique du CNN → évaluation → extension 3 classes.
+const SLIDES = ['sIntro','s1','s2','s3','s4','s5','s6','s7','sEval','sRoc','sOrigin'];
+const N = SLIDES.length;
 let cur = 0;
-const anims = {};
+let rafId = null;   // une seule animation active à la fois
 
 // Vraies radios (chargées au démarrage)
 const xrayNormal   = new Image();
@@ -522,13 +499,14 @@ for (let i = 0; i < N; i++) {
   d.addEventListener('click', () => goTo(i));
   dotsRow.appendChild(d);
 }
+document.getElementById('step-ctr').textContent = `Étape 1 / ${N}`;
 
 function goTo(idx) {
-  if (anims[cur]) { cancelAnimationFrame(anims[cur]); delete anims[cur]; }
-  document.getElementById('s'+(cur+1)).classList.remove('active');
+  if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+  document.getElementById(SLIDES[cur]).classList.remove('active');
   dotsRow.children[cur].classList.remove('on');
   cur = idx;
-  document.getElementById('s'+(cur+1)).classList.add('active');
+  document.getElementById(SLIDES[cur]).classList.add('active');
   dotsRow.children[cur].classList.add('on');
   document.getElementById('step-ctr').textContent = `Étape ${cur+1} / ${N}`;
   document.getElementById('prev-btn').disabled = cur === 0;
@@ -564,7 +542,7 @@ function gc(id) {
 }
 
 // ── Helpers dessin ──────────────────────────────────────
-function bg(ctx, W, H, col='#161b22') { ctx.fillStyle = col; ctx.fillRect(0, 0, W, H); }
+function bg(ctx, W, H, col='#0f172a') { ctx.fillStyle = col; ctx.fillRect(0, 0, W, H); }
 
 function t(ctx, str, x, y, sz, col, align='center', weight='normal') {
   ctx.save();
@@ -580,7 +558,7 @@ function rr(ctx, x, y, w, h, r, fill, stroke, lw=1) {
   if (stroke){ ctx.strokeStyle = stroke; ctx.lineWidth = lw; ctx.stroke(); }
 }
 
-function arr(ctx, x1, y1, x2, y2, col='#a78bfa', lw=2) {
+function arr(ctx, x1, y1, x2, y2, col='#2563eb', lw=2) {
   const a = Math.atan2(y2-y1, x2-x1);
   ctx.save(); ctx.strokeStyle = col; ctx.fillStyle = col; ctx.lineWidth = lw;
   ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke();
@@ -596,14 +574,14 @@ function arr(ctx, x1, y1, x2, y2, col='#a78bfa', lw=2) {
 //  S1 — Vraie radio + grille de pixels
 // ════════════════════════════════════════════════════════
 function drawS1() {
-  const c = gc('cv1'); if (!c.width) { anims[0]=requestAnimationFrame(drawS1); return; }
+  const c = gc('cv1'); if (!c.width) { rafId=requestAnimationFrame(drawS1); return; }
   const ctx = c.getContext('2d'), W = c.width, H = c.height;
   bg(ctx, W, H);
 
   // ── Vraie radio à gauche ──
   const imgW = W * 0.38, imgH = H * 0.86;
   const imgX = W * 0.02, imgY = H * 0.07;
-  rr(ctx, imgX, imgY, imgW, imgH, 8, '#0a0e14', '#30363d');
+  rr(ctx, imgX, imgY, imgW, imgH, 8, '#0b1220', '#30363d');
 
   if (xrayNormal.complete && xrayNormal.naturalWidth > 0) {
     // Dessiner la vraie radio en respectant le ratio
@@ -653,9 +631,9 @@ function drawS1() {
   t(ctx, '(extrait de 10×7 pixels de la radio réelle)', GX+cols*cell/2, GY+rows*cell+34, 11, '#484f58');
 
   // Flèche radio → grille
-  arr(ctx, imgX+imgW+10, imgY+imgH/2, GX-12, GY+rows*cell/2, '#a78bfa', 2);
-  t(ctx, 'zoom', imgX+imgW+32, imgY+imgH/2-16, 11, '#a78bfa');
-  t(ctx, 'pixels', imgX+imgW+32, imgY+imgH/2, 11, '#a78bfa');
+  arr(ctx, imgX+imgW+10, imgY+imgH/2, GX-12, GY+rows*cell/2, '#2563eb', 2);
+  t(ctx, 'zoom', imgX+imgW+32, imgY+imgH/2-16, 11, '#2563eb');
+  t(ctx, 'pixels', imgX+imgW+32, imgY+imgH/2, 11, '#2563eb');
   // (pas d'animation ici, image statique)
 }
 
@@ -664,9 +642,9 @@ function drawS1() {
 // ════════════════════════════════════════════════════════
 let s2t = 0;
 function drawS2() {
-  const c = gc('cv2'); if (!c.width) { anims[1]=requestAnimationFrame(drawS2); return; }
+  const c = gc('cv2'); if (!c.width) { rafId=requestAnimationFrame(drawS2); return; }
   // Si les images ne sont pas encore chargées, réessayer au prochain frame
-  if (!xrayPneumo.complete || !xrayPneumo.naturalWidth) { anims[1]=requestAnimationFrame(drawS2); return; }
+  if (!xrayPneumo.complete || !xrayPneumo.naturalWidth) { rafId=requestAnimationFrame(drawS2); return; }
   const ctx = c.getContext('2d'), W = c.width, H = c.height;
   bg(ctx, W, H);
 
@@ -685,7 +663,7 @@ function drawS2() {
   const midW   = col3X - midX;
 
   // ── Col 1 : radio originale ──────────────────────────────────────
-  rr(ctx, col1X, imgY, imgW, imgH, 8, '#0a0e14', '#30363d');
+  rr(ctx, col1X, imgY, imgW, imgH, 8, '#0b1220', '#30363d');
 
   const ratio  = xrayPneumo.naturalWidth / xrayPneumo.naturalHeight;
   let dw = imgW-8, dh = dw/ratio;
@@ -696,17 +674,17 @@ function drawS2() {
   ctx.restore();
 
   // Annotations sur la photo
-  rr(ctx, col1X+8, imgY+8, imgW-16, 40, 5, '#0d1117bb', null);
+  rr(ctx, col1X+8, imgY+8, imgW-16, 40, 5, '#0b1220bb', null);
   t(ctx, 'Radiographie originale (PNEUMONIE)', col1X+imgW/2, imgY+20, 12, '#e2e8f0');
   t(ctx, '1 280 × 863 pixels  ·  entiers [0–255]', col1X+imgW/2, imgY+36, 11, '#94a3b8');
 
   // Pixel value bubble
-  rr(ctx, col1X+imgW-70, imgY+imgH-38, 62, 26, 5, '#0d1117cc', '#f59e0b', 1.5);
+  rr(ctx, col1X+imgW-70, imgY+imgH-38, 62, 26, 5, '#0b1220cc', '#f59e0b', 1.5);
   t(ctx, 'pixel: 173', col1X+imgW-39, imgY+imgH-25, 10, '#f59e0b');
 
   // ── Centre : 3 étapes ───────────────────────────────────────────
   const steps = [
-    { label: '① Niveaux de gris', sub: '3 canaux → 1 canal', color: '#8b5cf6' },
+    { label: '① Niveaux de gris', sub: '3 canaux → 1 canal', color: '#2563eb' },
     { label: '② Resize 64×64',    sub: 'Taille fixe requise', color: '#ec4899' },
     { label: '③ ÷ 255',           sub: 'Flottants [0.0–1.0]', color: '#6ee7b7' },
   ];
@@ -718,13 +696,13 @@ function drawS2() {
     const ax1 = midX + 8, ax2 = col3X - 8;
     arr(ctx, ax1, cy, ax2, cy, s.color, 2);
     // Étiquette sur la flèche
-    rr(ctx, ax1+(ax2-ax1)*0.1, cy-22, (ax2-ax1)*0.8, 38, 6, '#161b22', s.color, 1.5);
+    rr(ctx, ax1+(ax2-ax1)*0.1, cy-22, (ax2-ax1)*0.8, 38, 6, '#0f172a', s.color, 1.5);
     t(ctx, s.label, (ax1+ax2)/2, cy-9, 13, s.color, 'center', 'bold');
     t(ctx, s.sub,   (ax1+ax2)/2, cy+9, 11, '#8b949e');
   });
 
   // ── Col 3 : résultat 64×64 ──────────────────────────────────────
-  rr(ctx, col3X, imgY, imgW, imgH, 8, '#0a0e14', '#30363d');
+  rr(ctx, col3X, imgY, imgW, imgH, 8, '#0b1220', '#30363d');
 
   // Image pixelisée (simule le 64×64)
   const zoom   = Math.min((imgW*0.56)/64, (imgH*0.56)/64);
@@ -738,7 +716,7 @@ function drawS2() {
   ctx.imageSmoothingEnabled = true;
 
   // Grille légère par-dessus
-  ctx.strokeStyle = '#a78bfa22'; ctx.lineWidth = 0.4;
+  ctx.strokeStyle = '#2563eb22'; ctx.lineWidth = 0.4;
   const step = zoom * 8;
   for (let i=0; i<=Math.ceil(pxW/step); i++) {
     const lx = pxX + i*step;
@@ -751,7 +729,7 @@ function drawS2() {
   ctx.restore();
 
   // Annotations
-  rr(ctx, col3X+8, imgY+8, imgW-16, 40, 5, '#0d1117bb', null);
+  rr(ctx, col3X+8, imgY+8, imgW-16, 40, 5, '#0b1220bb', null);
   t(ctx, 'Après prétraitement', col3X+imgW/2, imgY+20, 12, '#e2e8f0');
   t(ctx, '64 × 64 pixels  ·  flottants [0.0–1.0]', col3X+imgW/2, imgY+36, 11, '#94a3b8');
 
@@ -770,7 +748,7 @@ function drawS2() {
     ctx.strokeStyle='#30363d'; ctx.lineWidth=.5;
     ctx.strokeRect(zpX+ci*cellPx, zpY+ri*cellPx, cellPx-1, cellPx-1);
     const fs = Math.max(8, cellPx*0.26);
-    t(ctx, v.toFixed(2), zpX+ci*cellPx+cellPx/2, zpY+ri*cellPx+cellPx/2, fs, v>.55?'#0d1117':'#e2e8f0');
+    t(ctx, v.toFixed(2), zpX+ci*cellPx+cellPx/2, zpY+ri*cellPx+cellPx/2, fs, v>.55?'#0b1220':'#e2e8f0');
   }));
   ctx.strokeStyle='#f59e0b'; ctx.lineWidth=1.5;
   ctx.strokeRect(zpX, zpY, nc*cellPx, nc*cellPx);
@@ -798,7 +776,7 @@ let cOut = Array(6).fill(null).map(()=>Array(6).fill(null));
 function calcC(i,j){let s=0;for(let fi=0;fi<3;fi++)for(let fj=0;fj<3;fj++)s+=cInput[i+fi][j+fj]*cFilt[fi][fj];return Math.max(0,s);}
 
 function drawS3() {
-  const c = gc('cv3'); if (!c.width) { anims[2]=requestAnimationFrame(drawS3); return; }
+  const c = gc('cv3'); if (!c.width) { rafId=requestAnimationFrame(drawS3); return; }
   const ctx = c.getContext('2d'), W = c.width, H = c.height;
   bg(ctx, W, H);
   convT++;
@@ -823,8 +801,8 @@ function drawS3() {
     const g=Math.round(v*220);
     ctx.fillStyle=inP?`rgba(167,139,250,0.35)`:`rgb(${g},${g},${g})`;
     ctx.fillRect(GX+c2*cell,GY+r*cell,cell-1,cell-1);
-    if(inP){ctx.strokeStyle='#a78bfa';ctx.lineWidth=1.5;ctx.strokeRect(GX+c2*cell,GY+r*cell,cell-1,cell-1);}
-    t(ctx,v.toFixed(1),GX+c2*cell+cell/2,GY+r*cell+cell/2,Math.max(6,cell*.26),v>.5?'#0d1117':'#8b949e');
+    if(inP){ctx.strokeStyle='#2563eb';ctx.lineWidth=1.5;ctx.strokeRect(GX+c2*cell,GY+r*cell,cell-1,cell-1);}
+    t(ctx,v.toFixed(1),GX+c2*cell+cell/2,GY+r*cell+cell/2,Math.max(6,cell*.26),v>.5?'#0b1220':'#8b949e');
   }
 
   // ── Col2 : filtre 3×3 en haut, calc en bas ──
@@ -846,7 +824,7 @@ function drawS3() {
   for(let r=0;r<3;r++) for(let c2=0;c2<3;c2++){const v=cInput[pi+r][pj+c2],w=cFilt[r][c2],p=v*w;parts.push({v,w,p});tot+=p;}
   const rv=Math.max(0,tot);
   const CX=W*0.36, CY=FY+3*fc+H*0.05, CW=W*0.28, CH=H-CY-H*0.04;
-  rr(ctx,CX,CY,CW,CH,6,'#0d1117','#30363d');
+  rr(ctx,CX,CY,CW,CH,6,'#0b1220','#30363d');
   t(ctx,`Position [${pi},${pj}] — produit scalaire`,CX+CW/2,CY+14,11,'#8b949e');
 
   // 9 termes en grille 3×3 avec une police lisible
@@ -874,11 +852,11 @@ function drawS3() {
     const opacity=val!==null?Math.min(val/maxOut,1)*.85+.05:0.04;
     ctx.fillStyle=`rgba(167,139,250,${opacity})`;
     ctx.fillRect(OX+c2*oc,OY+r*oc,oc-1,oc-1);
-    ctx.strokeStyle=isCur?'#a78bfa':'#30363d44';ctx.lineWidth=isCur?2:.4;
+    ctx.strokeStyle=isCur?'#2563eb':'#30363d44';ctx.lineWidth=isCur?2:.4;
     ctx.strokeRect(OX+c2*oc,OY+r*oc,oc-1,oc-1);
     // Valeur numérique dans la cellule
     if(val!==null){
-      const textColor=opacity>0.5?'#0d1117':'#e2e8f0';
+      const textColor=opacity>0.5?'#0b1220':'#e2e8f0';
       t(ctx,val.toFixed(2),OX+c2*oc+oc/2,OY+r*oc+oc/2,Math.max(8,oc*0.24),textColor);
     }
   }
@@ -887,13 +865,13 @@ function drawS3() {
   const lg=ctx.createLinearGradient(lx,ly,lx+lw,ly);
   lg.addColorStop(0,'rgba(167,139,250,0.05)'); lg.addColorStop(1,'rgba(167,139,250,0.9)');
   ctx.fillStyle=lg; ctx.fillRect(lx,ly,lw,8);
-  t(ctx,'0',lx,ly+18,9,'#6e7681','left'); t(ctx,'fort',lx+lw,ly+18,9,'#a78bfa','right');
+  t(ctx,'0',lx,ly+18,9,'#6e7681','left'); t(ctx,'fort',lx+lw,ly+18,9,'#2563eb','right');
 
   // Flèches de liaison
-  arr(ctx,GX+8*cell+6,GY+4*cell,FX-4,FY+1.5*fc,'#a78bfa44',1.5);
-  arr(ctx,CX+CW+4,CY+CH/2,OX-4,OY+3*oc,'#a78bfa',1.5);
+  arr(ctx,GX+8*cell+6,GY+4*cell,FX-4,FY+1.5*fc,'#2563eb44',1.5);
+  arr(ctx,CX+CW+4,CY+CH/2,OX-4,OY+3*oc,'#2563eb',1.5);
 
-  anims[2]=requestAnimationFrame(drawS3);
+  rafId=requestAnimationFrame(drawS3);
 }
 
 // ════════════════════════════════════════════════════════
@@ -902,7 +880,7 @@ function drawS3() {
 let s4t=0;
 const reluVals=[-1.4, -0.8, 0.6, 1.3, -0.3, 0.9, -1.1, 1.7];
 function drawS4(){
-  const c=gc('cv4');if(!c.width){anims[3]=requestAnimationFrame(drawS4);return;}
+  const c=gc('cv4');if(!c.width){rafId=requestAnimationFrame(drawS4);return;}
   const ctx=c.getContext('2d'),W=c.width,H=c.height; bg(ctx,W,H);
   s4t++;
 
@@ -943,8 +921,8 @@ function drawS4(){
   const legY = y;
 
   // ── Formule ──
-  rr(ctx, W*0.22, fY, W*0.56, formulaH, 6, '#13111e', '#a78bfa', 2);
-  t(ctx, 'f(x) = max(0, x)', W/2, fY + formulaH/2, Math.min(18, formulaH*0.52), '#a78bfa', 'center', 'bold');
+  rr(ctx, W*0.22, fY, W*0.56, formulaH, 6, '#1e293b', '#2563eb', 2);
+  t(ctx, 'f(x) = max(0, x)', W/2, fY + formulaH/2, Math.min(18, formulaH*0.52), '#2563eb', 'center', 'bold');
 
   // ── Labels ──
   t(ctx, 'ENTRÉE — valeurs brutes (avant ReLU)', W/2, l1Y + labelH/2, 12, '#94a3b8', 'center', 'bold');
@@ -986,7 +964,7 @@ function drawS4(){
 
   // ── Légende ──
   if (legY + legendH <= H) {
-    rr(ctx, pad, legY, W-pad*2, legendH, 5, '#0d1117', '#21262d');
+    rr(ctx, pad, legY, W-pad*2, legendH, 5, '#0b1220', '#21262d');
     const lm = legY + legendH/2;
     rr(ctx, pad+10, lm-7, 14, 14, 3, '#14532d', '#6ee7b7', 1.5);
     t(ctx, 'Valeur positive → conservée', pad+30, lm, 11, '#6ee7b7', 'left');
@@ -994,7 +972,7 @@ function drawS4(){
     t(ctx, 'Valeur négative → remplacée par 0', W/2+30, lm, 11, '#fca5a5', 'left');
   }
 
-  anims[3]=requestAnimationFrame(drawS4);
+  rafId=requestAnimationFrame(drawS4);
 }
 
 // ════════════════════════════════════════════════════════
@@ -1008,52 +986,61 @@ const pIn=[
 ];
 let s5t=0,pReg=0;
 function drawS5(){
-  const c=gc('cv5');if(!c.width){anims[4]=requestAnimationFrame(drawS5);return;}
+  const c=gc('cv5');if(!c.width){rafId=requestAnimationFrame(drawS5);return;}
   const ctx=c.getContext('2d'),W=c.width,H=c.height; bg(ctx,W,H);
   s5t++;
   if(s5t%65===0)pReg=(pReg+1)%9;
   const pr=Math.floor(pReg/3)*2, pc=(pReg%3)*2;
 
-  const cell=Math.min(H*0.13,W*0.095);
-  const GX=(W*0.46-3*cell)/2+W*0.02, GY=(H-6*cell)/2;
-  t(ctx,'Feature map d\'entrée (6×6)',GX+3*cell,GY-22,13,'#6e7681');
+  // Layout borné : input(6) + flèche + output(3) tiennent toujours dans [pad, W-pad].
+  const F=s=>Math.min(s, W*0.014);
+  const pad=W*0.05, arrowW=W*0.16;
+  const availW=W-2*pad-arrowW;
+  const ci=Math.min(availW/9, (H-H*0.22)/6);   // input & output : même taille de cellule
+  const gridsTop=(H-6*ci)/2 + H*0.02;
+  const inX=pad, inY=gridsTop;
+  const outX=pad+6*ci+arrowW;
+  const outY=gridsTop+(6*ci-3*ci)/2;
+  const midY=gridsTop+3*ci;
 
+  t(ctx,'Feature map d\'entrée (6×6)',inX+3*ci,inY-H*0.04,F(13),'#8b949e');
+  t(ctx,'Sortie max pool (3×3)',outX+1.5*ci,outY-H*0.04,F(13),'#8b949e');
+
+  // ── Input 6×6 ──
   for(let r=0;r<6;r++) for(let c2=0;c2<6;c2++){
-    const inR=r>=pr&&r<pr+2&&c2>=pc&&c2<pc+2;
+    const inRg=r>=pr&&r<pr+2&&c2>=pc&&c2<pc+2;
     const v=pIn[r][c2];
     const m=Math.max(pIn[pr][pc],pIn[pr][pc+1],pIn[pr+1][pc],pIn[pr+1][pc+1]);
-    const isMax=inR&&v===m;
-    ctx.fillStyle=isMax?'#14532d':inR?'#1c2a1e':`rgb(${v},${v},${v})`;
-    ctx.fillRect(GX+c2*cell,GY+r*cell,cell-2,cell-2);
-    ctx.strokeStyle=inR?'#6ee7b7':'#21262d';ctx.lineWidth=inR?2:.5;
-    ctx.strokeRect(GX+c2*cell,GY+r*cell,cell-2,cell-2);
-    t(ctx,v,GX+c2*cell+cell/2,GY+r*cell+cell/2,Math.max(10,cell*.28),isMax?'#86efac':inR?'#4ade80':v>140?'#0d1117':'#a0aec0','center',isMax?'bold':'normal');
-    if(isMax)t(ctx,'★',GX+c2*cell+cell-10,GY+r*cell+10,10,'#6ee7b7');
+    const isMax=inRg&&v===m;
+    ctx.fillStyle=isMax?'#14532d':inRg?'#1c2a1e':`rgb(${v},${v},${v})`;
+    ctx.fillRect(inX+c2*ci,inY+r*ci,ci-2,ci-2);
+    ctx.strokeStyle=inRg?'#6ee7b7':'#21262d';ctx.lineWidth=inRg?2:.5;
+    ctx.strokeRect(inX+c2*ci,inY+r*ci,ci-2,ci-2);
+    t(ctx,v,inX+c2*ci+ci/2,inY+r*ci+ci/2,F(Math.max(9,ci*0.28)),isMax?'#86efac':inRg?'#4ade80':v>140?'#0b1220':'#a0aec0','center',isMax?'bold':'normal');
+    if(isMax)t(ctx,'★',inX+c2*ci+ci-9,inY+r*ci+9,F(10),'#6ee7b7');
   }
 
-  // Flèche
-  const ax=GX+6*cell+20;
-  arr(ctx,ax,GY+3*cell,ax+W*0.13,GY+3*cell,'#a78bfa',2);
-  t(ctx,'MAX',ax+W*0.065,GY+3*cell-20,13,'#a78bfa','center','bold');
-  t(ctx,'POOL 2×2',ax+W*0.065,GY+3*cell-5,12,'#a78bfa');
+  // ── Flèche MAX POOL ──
+  arr(ctx,inX+6*ci+W*0.025,midY,outX-W*0.025,midY,'#2563eb',2);
+  t(ctx,'MAX POOL 2×2',(inX+6*ci+outX)/2,midY-12,F(12),'#2563eb','center','bold');
 
-  // Output 3×3
-  const oc=Math.min(H*0.18,W*0.13);
-  const OX=ax+W*0.16, OY=(H-3*oc)/2;
+  // ── Output 3×3 ──
   const pOut=[[230,225,212],[208,238,248],[212,248,248]];
-  t(ctx,'Sortie max pool (3×3)',OX+1.5*oc,OY-22,13,'#6e7681');
   for(let r=0;r<3;r++) for(let c2=0;c2<3;c2++){
     const cur=r*3+c2===pReg,v=pOut[r][c2];
     ctx.fillStyle=cur?'#14532d':'#1e293b';
-    ctx.fillRect(OX+c2*oc,OY+r*oc,oc-2,oc-2);
+    ctx.fillRect(outX+c2*ci,outY+r*ci,ci-2,ci-2);
     ctx.strokeStyle=cur?'#6ee7b7':'#30363d';ctx.lineWidth=cur?2:.8;
-    ctx.strokeRect(OX+c2*oc,OY+r*oc,oc-2,oc-2);
-    t(ctx,v,OX+c2*oc+oc/2,OY+r*oc+oc/2,Math.max(13,oc*.28),cur?'#86efac':'#8b949e','center','bold');
+    ctx.strokeRect(outX+c2*ci,outY+r*ci,ci-2,ci-2);
+    t(ctx,v,outX+c2*ci+ci/2,outY+r*ci+ci/2,F(Math.max(12,ci*0.28)),cur?'#86efac':'#8b949e','center','bold');
   }
-  rr(ctx,W*0.08,H*0.91,W*0.84,28,5,'#0d1117','#30363d');
-  t(ctx,'★ = maximum de la région 2×2  ·  Résolution : 6×6 → 3×3 (÷2 dans chaque dimension)',W/2,H*0.924,12,'#8b949e');
 
-  anims[4]=requestAnimationFrame(drawS5);
+  // ── Légende ──
+  const lh=Math.min(28,H*0.07), ly=H-H*0.085;
+  rr(ctx,pad,ly,W-2*pad,lh,5,'#0b1220','#30363d');
+  t(ctx,'★ = maximum de la région 2×2  ·  6×6 → 3×3 (÷2 par dimension)',W/2,ly+lh/2,F(12),'#8b949e');
+
+  rafId=requestAnimationFrame(drawS5);
 }
 
 // ════════════════════════════════════════════════════════
@@ -1063,7 +1050,7 @@ const dW=[[ 0.8,-0.5, 0.3,-0.7, 0.9],[-0.4, 0.6,-0.8, 0.5,-0.3]];
 const dX=[0.72,0.18,0.85,0.12,0.64];
 let s6t=0;
 function drawS6(){
-  const c=gc('cv6');if(!c.width){anims[5]=requestAnimationFrame(drawS6);return;}
+  const c=gc('cv6');if(!c.width){rafId=requestAnimationFrame(drawS6);return;}
   const ctx=c.getContext('2d'),W=c.width,H=c.height; bg(ctx,W,H);
   s6t++;
 
@@ -1088,7 +1075,7 @@ function drawS6(){
     ctx.fillStyle=w>0?'#6ee7b7':'#fca5a5';ctx.fill();
     // Label poids
     const mx=(x1+nr+x2-nr)/2,my=(y1s[i]+y2s[j])/2;
-    ctx.fillStyle='#0d1117';ctx.fillRect(mx-16,my-8,32,15);
+    ctx.fillStyle='#0b1220';ctx.fillRect(mx-16,my-8,32,15);
     t(ctx,'w='+w,mx,my-1,9,w>0?'#6ee7b7':'#fca5a5');
     ctx.restore();
   }
@@ -1100,7 +1087,7 @@ function drawS6(){
     const a=dX[i],g=Math.round(a*200);
     ctx.beginPath();ctx.arc(x1,y,nr,0,Math.PI*2);
     ctx.fillStyle=`rgb(${g+30},${Math.round(g*.6)},20)`;ctx.fill();
-    ctx.strokeStyle='#a78bfa';ctx.lineWidth=1.5;ctx.stroke();
+    ctx.strokeStyle='#2563eb';ctx.lineWidth=1.5;ctx.stroke();
     t(ctx,a.toFixed(2),x1,y,10,'#fff','center','bold');
     t(ctx,'x'+(i+1),x1-nr-16,y,10,'#6e7681');
   });
@@ -1116,7 +1103,7 @@ function drawS6(){
     t(ctx,sv.toFixed(3),x2,y2s[j],10,'#fff','center','bold');
     // Boîte formule
     const fx=x2+nr*1.5+8, fw=W*0.28, fy=y2s[j];
-    rr(ctx,fx,fy-46,fw,92,6,'#0d1117','#30363d');
+    rr(ctx,fx,fy-46,fw,92,6,'#0b1220','#30363d');
     t(ctx,'Score brut',fx+fw/2,fy-32,10,'#6e7681');
     t(ctx,'= Σ(wᵢ × xᵢ) + b',fx+fw/2,fy-18,10,'#8b949e');
     t(ctx,'= '+raw.toFixed(3),fx+fw/2,fy-4,12,'#c9d1d9','center','bold');
@@ -1126,7 +1113,7 @@ function drawS6(){
     t(ctx,sv>.5?'→ PNEUMONIE':'→ NORMAL',fx+fw/2,fy+38,12,sv>.5?'#fca5a5':'#86efac','center','bold');
   });
 
-  anims[5]=requestAnimationFrame(drawS6);
+  rafId=requestAnimationFrame(drawS6);
 }
 
 // ════════════════════════════════════════════════════════
@@ -1134,7 +1121,7 @@ function drawS6(){
 // ════════════════════════════════════════════════════════
 let s7t=0;
 function drawS7(){
-  const c=gc('cv7');if(!c.width){anims[6]=requestAnimationFrame(drawS7);return;}
+  const c=gc('cv7');if(!c.width){rafId=requestAnimationFrame(drawS7);return;}
   const ctx=c.getContext('2d'),W=c.width,H=c.height; bg(ctx,W,H);
   s7t++;
   const tv=(s7t*0.6)%320;  // 0→320 puis repart
@@ -1154,7 +1141,7 @@ function drawS7(){
   steps.forEach((s,i)=>{
     const cy=startY+i*(CH+H*0.05);
     const a=i===step%4;
-    rr(ctx,CX,cy,CW,CH,8,a?'#1e1b3a':'#0d1117',a?'#a78bfa':'#30363d',a?2:1);
+    rr(ctx,CX,cy,CW,CH,8,a?'#1e3a8a':'#0b1220',a?'#2563eb':'#30363d',a?2:1);
 
     // Icône
     ctx.font=`${Math.round(CH*0.36)}px sans-serif`;ctx.textAlign='left';ctx.textBaseline='middle';
@@ -1162,7 +1149,7 @@ function drawS7(){
     const lblFont = Math.max(13, Math.min(18, CH * 0.22));
     const subFont = Math.max(11, Math.min(15, CH * 0.17));
     t(ctx,s.lbl,CX+CW*0.12,cy+CH*0.3,lblFont,a?'#e2e8f0':'#8b949e','left','bold');
-    t(ctx,s.sub,CX+CW*0.12,cy+CH*0.68,subFont,a?'#a78bfa':'#484f58','left');
+    t(ctx,s.sub,CX+CW*0.12,cy+CH*0.68,subFont,a?'#2563eb':'#484f58','left');
 
     // Flèche vers la suivante
     if(i<steps.length-1){
@@ -1179,16 +1166,16 @@ function drawS7(){
   // Flèche retour (à gauche des cards, de bas en haut)
   const loopX=CX-18;
   const topY=startY+CH/2, botY=startY+totalH-CH/2;
-  ctx.strokeStyle='#a78bfa66';ctx.lineWidth=1.5;
+  ctx.strokeStyle='#2563eb66';ctx.lineWidth=1.5;
   ctx.beginPath();ctx.moveTo(CX,botY);ctx.lineTo(loopX,botY);ctx.lineTo(loopX,topY);ctx.lineTo(CX,topY);ctx.stroke();
   ctx.beginPath();
   ctx.moveTo(CX,topY);ctx.lineTo(CX-6,topY+8);ctx.lineTo(CX+6,topY+8);
-  ctx.closePath();ctx.fillStyle='#a78bfa66';ctx.fill();
-  t(ctx,'×N',loopX-14,H/2,10,'#a78bfa66');
+  ctx.closePath();ctx.fillStyle='#2563eb66';ctx.fill();
+  t(ctx,'×N',loopX-14,H/2,10,'#2563eb66');
 
   // ── Droite : courbe Loss ──────────────────────────────────────────
   const GX=W*0.40, GY=H*0.07, GW=W*0.56, GH=H*0.82;
-  rr(ctx,GX-6,GY-16,GW+12,GH+26,8,'#0d1117','#21262d');
+  rr(ctx,GX-6,GY-16,GW+12,GH+26,8,'#0b1220','#21262d');
   t(ctx,'Évolution de la Loss pendant l\'entraînement',GX+GW/2,GY-6,13,'#6e7681');
 
   // Axes
@@ -1208,7 +1195,7 @@ function drawS7(){
 
   // Courbe Loss qui se dessine
   const nP=120, drawn=Math.min(nP,Math.round(tv*nP/280));
-  ctx.strokeStyle='#a78bfa';ctx.lineWidth=2.5;ctx.beginPath();
+  ctx.strokeStyle='#2563eb';ctx.lineWidth=2.5;ctx.beginPath();
   for(let p=0;p<=drawn;p++){
     const x=GX+p*GW/nP, prog=p/nP;
     const noise=Math.sin(p*1.6)*.05+Math.sin(p*3.7)*.022;
@@ -1224,10 +1211,10 @@ function drawS7(){
     const lv2=0.72*Math.exp(-prog2*2.8)+0.13+noise2;
     const px2=GX+drawn*GW/nP, py2=GY+GH-lv2*GH;
     ctx.beginPath();ctx.arc(px2,py2,7,0,Math.PI*2);
-    ctx.fillStyle='#a78bfa';ctx.fill();
-    ctx.strokeStyle='#0d1117';ctx.lineWidth=2;ctx.stroke();
-    rr(ctx,px2+12,py2-16,82,26,4,'#0d1117','#a78bfa');
-    t(ctx,'loss = '+lv2.toFixed(3),px2+53,py2-3,10,'#a78bfa');
+    ctx.fillStyle='#2563eb';ctx.fill();
+    ctx.strokeStyle='#0b1220';ctx.lineWidth=2;ctx.stroke();
+    rr(ctx,px2+12,py2-16,82,26,4,'#0b1220','#2563eb');
+    t(ctx,'loss = '+lv2.toFixed(3),px2+53,py2-3,10,'#2563eb');
   }
 
   // Ligne de convergence
@@ -1236,11 +1223,210 @@ function drawS7(){
   ctx.setLineDash([]);
   t(ctx,'~ minimum (convergence)',GX+GW-6,GY+GH-0.14*GH-11,10,'#6ee7b7','right');
 
-  anims[6]=requestAnimationFrame(drawS7);
+  rafId=requestAnimationFrame(drawS7);
 }
 
+// ════════════════════════════════════════════════════════
+//  S0 — Contexte : le problème & les données
+// ════════════════════════════════════════════════════════
+function drawIntro(){
+  const c=gc('cvIntro'); if(!c.width){rafId=requestAnimationFrame(drawIntro);return;}
+  if(!xrayPneumo.complete||!xrayPneumo.naturalWidth){rafId=requestAnimationFrame(drawIntro);return;}
+  const ctx=c.getContext('2d'),W=c.width,H=c.height; bg(ctx,W,H);
+
+  // ── Gauche : radio ──
+  const imgW=W*0.32, imgH=H*0.82, imgX=W*0.03, imgY=(H-imgH)/2;
+  rr(ctx,imgX,imgY,imgW,imgH,8,'#0b1220','#30363d');
+  const ratio=xrayPneumo.naturalWidth/xrayPneumo.naturalHeight;
+  let dw=imgW-10, dh=dw/ratio; if(dh>imgH-10){dh=imgH-10;dw=dh*ratio;}
+  ctx.save();ctx.beginPath();ctx.roundRect(imgX+2,imgY+2,imgW-4,imgH-4,6);ctx.clip();
+  ctx.drawImage(xrayPneumo,imgX+(imgW-dw)/2,imgY+(imgH-dh)/2,dw,dh);ctx.restore();
+  rr(ctx,imgX,imgY+imgH-26,imgW,26,[0,0,6,6],'#0009',null);
+  t(ctx,'Radiographie thoracique (entrée)',imgX+imgW/2,imgY+imgH-13,11,'#8b949e');
+
+  // ── Droite : données ──
+  const RX=W*0.40, RW=W*0.56;
+  t(ctx,'Jeu de données — 5 856 radios étiquetées par des médecins',RX+RW/2,H*0.10,13,'#c9d1d9','center','bold');
+
+  // Bloc 1 : NORMAL vs PNEUMONIE
+  t(ctx,'Répartition train : NORMAL vs PNEUMONIE',RX,H*0.22,12,'#8b949e','left');
+  const total=1341+3875, barY=H*0.26, barH=26, wN=RW*1341/total;
+  rr(ctx,RX,barY,wN,barH,4,'#4C9F70',null);
+  rr(ctx,RX+wN,barY,RW-wN,barH,4,'#D7544C',null);
+  t(ctx,'NORMAL 1341 (26%)',RX+wN/2,barY+barH/2,9,'#06210f','center','bold');
+  t(ctx,'PNEUMONIE 3875 (74%)',RX+wN+(RW-wN)/2,barY+barH/2,11,'#2a0606','center','bold');
+  t(ctx,'→ « toujours pneumonie » donnerait déjà 74% : il faut de bonnes métriques',RX,barY+barH+16,10,'#6e7681','left');
+
+  // Bloc 2 : 3 classes
+  t(ctx,'Origine de la pneumonie (3 classes)',RX,H*0.50,12,'#8b949e','left');
+  const seg=[['NORMAL',1341,'#4C9F70'],['VIRUS',1345,'#E8A33D'],['BACTÉRIE',2530,'#D7544C']];
+  const tot3=seg.reduce((s,x)=>s+x[1],0);
+  let bx=RX; const by=H*0.54, bh=26;
+  seg.forEach(([name,val,col])=>{
+    const w=RW*val/tot3;
+    rr(ctx,bx,by,w-2,bh,3,col,null);
+    if(w>54) t(ctx,name,bx+w/2,by+bh/2,9,'#0d0d0d','center','bold');
+    bx+=w;
+  });
+
+  // Bloc 3 : pipeline résumé
+  t(ctx,'Le réseau en une phrase :',RX,H*0.74,12,'#8b949e','left');
+  const chips=['Radio','Conv ×2','Dense','Probabilité'];
+  let cx=RX; const cy=H*0.79, cw=RW*0.205, gap=RW*0.043;
+  chips.forEach((ch,i)=>{
+    rr(ctx,cx,cy,cw,30,6,'#1e293b','#1e3a8a',1.5);
+    t(ctx,ch,cx+cw/2,cy+15,11,'#2563eb','center','bold');
+    cx+=cw;
+    if(i<chips.length-1){ arr(ctx,cx+4,cy+15,cx+gap-4,cy+15,'#3b82f6',2); cx+=gap; }
+  });
+}
+
+// ════════════════════════════════════════════════════════
+//  S8 — Évaluation : split + matrice de confusion
+// ════════════════════════════════════════════════════════
+function drawEval(){
+  const c=gc('cvEval'); if(!c.width){rafId=requestAnimationFrame(drawEval);return;}
+  const ctx=c.getContext('2d'),W=c.width,H=c.height; bg(ctx,W,H);
+
+  const F=s=>Math.min(s, W*0.014);
+
+  // ── Zone haute : split train / validation / test ──
+  t(ctx,'On découpe les données en 3 rôles distincts',W/2,H*0.08,F(14),'#c9d1d9','center','bold');
+  const barX=W*0.07, barW=W*0.86, barY=H*0.15, barH=Math.min(46,H*0.11);
+  const parts=[['TRAIN','apprendre les poids',0.70,'#3b82f6'],
+               ['VALIDATION','régler les hyperparam.',0.15,'#2563eb'],
+               ['TEST','mesure finale',0.15,'#10b981']];
+  let x=barX;
+  parts.forEach(([name,sub,frac,col])=>{
+    const w=barW*frac;
+    rr(ctx,x,barY,w-4,barH,6,col,null);
+    t(ctx,name,x+(w-4)/2,barY+barH*0.38,F(12),'#fff','center','bold');
+    t(ctx,sub,x+(w-4)/2,barY+barH*0.74,F(9),'#e2e8f0cc');
+    x+=w;
+  });
+  t(ctx,'Le TEST n\'est jamais vu à l\'entraînement → estimation non biaisée',W/2,barY+barH+H*0.05,F(11),'#6e7681');
+
+  // ── Zone basse : matrice de confusion (gauche) + métriques (droite) ──
+  const cm=[[98,136],[2,388]], labels=['NORMAL','PNEUMONIE'], maxv=388;
+  const zoneTop=H*0.40, zoneH=H*0.56;
+  const mcell=Math.min(zoneH*0.40, W*0.14);
+  const labelW=W*0.10;
+  const gx=W*0.06+labelW;
+  const gy=zoneTop + (zoneH - 2*mcell)/2 + H*0.05;
+
+  t(ctx,'Matrice de confusion (test — 624 radios)',gx+mcell, zoneTop+H*0.02, F(13),'#c9d1d9','center','bold');
+  t(ctx,'Prédit →',gx+mcell,gy-H*0.035,F(11),'#8b949e');
+  t(ctx,labels[0],gx+mcell*0.5,gy-H*0.012,F(10),'#86efac');
+  t(ctx,labels[1],gx+mcell*1.5,gy-H*0.012,F(10),'#fca5a5');
+  for(let r=0;r<2;r++){
+    t(ctx,labels[r],gx-8,gy+mcell*(r+0.5),F(10),r===0?'#86efac':'#fca5a5','right');
+    for(let cc=0;cc<2;cc++){
+      const v=cm[r][cc], diag=r===cc, op=0.15+0.6*v/maxv;
+      ctx.fillStyle=diag?`rgba(16,185,129,${op})`:`rgba(239,68,68,${op})`;
+      ctx.fillRect(gx+cc*mcell,gy+r*mcell,mcell-2,mcell-2);
+      ctx.strokeStyle='#30363d';ctx.lineWidth=1;ctx.strokeRect(gx+cc*mcell,gy+r*mcell,mcell-2,mcell-2);
+      t(ctx,v,gx+cc*mcell+mcell/2,gy+r*mcell+mcell/2-mcell*0.08,F(Math.max(14,mcell*0.24)),'#fff','center','bold');
+      const tag=diag?'correct':(r===1?'pneumonie ratée':'fausse alerte');
+      t(ctx,tag,gx+cc*mcell+mcell/2,gy+r*mcell+mcell/2+mcell*0.24,F(9),'#e2e8f0bb');
+    }
+  }
+  // Métriques (largeur bornée pour rester dans le canvas)
+  const mgap=W*0.05, mx=gx+2*mcell+mgap, mw=Math.min(W*0.26, W-mx-W*0.05), mh=2*mcell;
+  rr(ctx,mx,gy,mw,mh,8,'#0b1220','#21262d');
+  t(ctx,'Métriques (test)',mx+mw/2,gy+mh*0.13,F(11),'#8b949e','center','bold');
+  [['Accuracy','0.78'],['Recall','0.99'],['Precision','0.74'],['F1','0.85']].forEach((rw,i)=>{
+    const ry=gy+mh*0.32+i*(mh*0.60/3);
+    t(ctx,rw[0],mx+mw*0.12,ry,F(11),'#6e7681','left');
+    t(ctx,rw[1],mx+mw*0.88,ry,F(13),'#2563eb','right','bold');
+  });
+}
+
+// ════════════════════════════════════════════════════════
+//  S9 — ROC-AUC (courbe animée)
+// ════════════════════════════════════════════════════════
+let rocT=0;
+function drawRoc(){
+  const c=gc('cvRoc'); if(!c.width){rafId=requestAnimationFrame(drawRoc);return;}
+  const ctx=c.getContext('2d'),W=c.width,H=c.height; bg(ctx,W,H);
+  rocT++;
+  const GW=Math.min(W*0.42,H*0.74), GH=GW;
+  const GX=W*0.50-GW/2, GY=H*0.13;
+  rr(ctx,GX-34,GY-12,GW+58,GH+54,8,'#0b1220','#21262d');
+  ctx.strokeStyle='#30363d';ctx.lineWidth=1.5;
+  ctx.beginPath();ctx.moveTo(GX,GY);ctx.lineTo(GX,GY+GH);ctx.lineTo(GX+GW,GY+GH);ctx.stroke();
+  t(ctx,'TPR (recall) ↑',GX+6,GY+8,10,'#484f58','left');
+  t(ctx,'FPR →',GX+GW-6,GY+GH-8,10,'#484f58','right');
+  // diagonale (hasard)
+  ctx.setLineDash([5,4]);ctx.strokeStyle='#64748b';ctx.lineWidth=1;
+  ctx.beginPath();ctx.moveTo(GX,GY+GH);ctx.lineTo(GX+GW,GY);ctx.stroke();ctx.setLineDash([]);
+  t(ctx,'hasard · AUC 0.5',GX+GW*0.60,GY+GH*0.42,9,'#64748b','left');
+  // courbe ROC : tpr = fpr^k, AUC = 1/(1+k) → k≈0.087 pour AUC≈0.92
+  const k=0.087, nP=100, drawn=Math.min(nP,Math.round(rocT*1.4));
+  ctx.strokeStyle='#D7544C';ctx.lineWidth=2.5;ctx.beginPath();
+  for(let p=0;p<=drawn;p++){
+    const fpr=p/nP, tpr=Math.pow(fpr,k);
+    const px=GX+fpr*GW, py=GY+GH-tpr*GH;
+    p===0?ctx.moveTo(px,py):ctx.lineTo(px,py);
+  }
+  ctx.stroke();
+  rr(ctx,GX+GW*0.34,GY+GH*0.58,GW*0.46,42,8,'#1e293b','#1e3a8a',1.5);
+  t(ctx,'AUC ≈ 0.92',GX+GW*0.57,GY+GH*0.58+17,15,'#2563eb','center','bold');
+  t(ctx,'(notre modèle)',GX+GW*0.57,GY+GH*0.58+33,9,'#6e7681');
+  if(drawn<nP) rafId=requestAnimationFrame(drawRoc);
+}
+
+// ════════════════════════════════════════════════════════
+//  S10 — Origine : Softmax 3 classes + confusion
+// ════════════════════════════════════════════════════════
+function drawOrigin(){
+  const c=gc('cvOrigin'); if(!c.width){rafId=requestAnimationFrame(drawOrigin);return;}
+  const ctx=c.getContext('2d'),W=c.width,H=c.height; bg(ctx,W,H);
+
+  // ── Gauche : Softmax ──
+  t(ctx,'Sortie Softmax — 3 probabilités (somme = 1)',W*0.25,H*0.12,13,'#c9d1d9','center','bold');
+  const dnx=W*0.07, dny=H*0.52, ny=[H*0.32,H*0.52,H*0.72], nx=W*0.13;
+  const probs=[['NORMAL',0.18,'#4C9F70'],['VIRUS',0.49,'#E8A33D'],['BACTÉRIE',0.33,'#D7544C']];
+  ny.forEach(y=>{ ctx.strokeStyle='#3b82f6';ctx.lineWidth=1.2;
+    ctx.beginPath();ctx.moveTo(dnx+15,dny);ctx.lineTo(nx-14,y);ctx.stroke(); });
+  ctx.beginPath();ctx.arc(dnx,dny,15,0,7);ctx.fillStyle='#1e293b';ctx.fill();
+  ctx.strokeStyle='#2563eb';ctx.lineWidth=1.5;ctx.stroke();
+  t(ctx,'Dense',dnx,dny-24,9,'#6e7681');
+  probs.forEach(([name,p,col],i)=>{
+    const y=ny[i];
+    ctx.beginPath();ctx.arc(nx,y,13,0,7);ctx.fillStyle=col;ctx.fill();
+    const bx=nx+26, bw=W*0.20;
+    rr(ctx,bx,y-10,bw,20,4,'#0b1220','#21262d');
+    rr(ctx,bx,y-10,bw*p,20,4,col,null);
+    t(ctx,name,bx+6,y,10,p>0.30?'#0d0d0d':'#e2e8f0','left','bold');
+    t(ctx,(p*100).toFixed(0)+'%',bx+bw+24,y,12,col,'center','bold');
+  });
+
+  // ── Droite : matrice 3×3 ──
+  t(ctx,'Matrice de confusion test (3 classes)',W*0.74,H*0.12,13,'#c9d1d9','center','bold');
+  const cm=[[102,104,28],[3,116,29],[8,21,213]], labels=['NOR','VIR','BAC'];
+  const cell=Math.min(H*0.18,W*0.095), gx=W*0.62, gy=H*0.24, maxv=213;
+  t(ctx,'Prédit →',gx+cell*1.5,gy-20,10,'#8b949e');
+  labels.forEach((l,cc)=>t(ctx,l,gx+cell*(cc+0.5),gy-6,9,'#8b949e'));
+  for(let r=0;r<3;r++){
+    t(ctx,labels[r],gx-6,gy+cell*(r+0.5),9,'#8b949e','right');
+    for(let cc=0;cc<3;cc++){
+      const v=cm[r][cc], diag=r===cc, op=0.12+0.7*v/maxv;
+      ctx.fillStyle=diag?`rgba(124,58,237,${op})`:`rgba(239,68,68,${op})`;
+      ctx.fillRect(gx+cc*cell,gy+r*cell,cell-2,cell-2);
+      ctx.strokeStyle='#30363d';ctx.lineWidth=1;ctx.strokeRect(gx+cc*cell,gy+r*cell,cell-2,cell-2);
+      t(ctx,v,gx+cc*cell+cell/2,gy+r*cell+cell/2,Math.max(11,cell*0.3),'#fff','center','bold');
+    }
+  }
+  t(ctx,'Diagonale = correct · virus ↔ bactérie souvent confondus',W*0.74,gy+3*cell+22,10,'#6e7681');
+}
+
+const DRAWS = {
+  sIntro: drawIntro, s1: drawS1, s2: drawS2, s3: drawS3, s4: drawS4,
+  s5: drawS5, s6: drawS6, s7: drawS7, sEval: drawEval, sRoc: drawRoc, sOrigin: drawOrigin,
+};
 function startAnim(idx){
-  [drawS1,drawS2,drawS3,drawS4,drawS5,drawS6,drawS7][idx]();
+  const fn = DRAWS[SLIDES[idx]];
+  if (fn) fn();
 }
 window.addEventListener('load',()=>setTimeout(()=>startAnim(0),50));
 
@@ -1261,9 +1447,9 @@ function buildContribChart(contributions) {
 
   const values = sorted.map(x => parseFloat(x.v.toFixed(4)));
   const colors = values.map(v =>
-    v > 0 ? 'rgba(252,165,165,0.85)' :
-    v < 0 ? 'rgba(134,239,172,0.85)' :
-            'rgba(45,45,90,0.5)');
+    v > 0 ? 'rgba(220,38,38,0.80)' :
+    v < 0 ? 'rgba(22,163,74,0.80)' :
+            'rgba(148,163,184,0.5)');
 
   const proPN = contributions.filter(v => v > 0).length;
   const proNM = contributions.filter(v => v < 0).length;
@@ -1283,8 +1469,8 @@ function buildContribChart(contributions) {
       plugins: {
         legend: { display: false },
         tooltip: {
-          backgroundColor: '#0c0c1e', borderColor: '#16163a', borderWidth: 1,
-          titleColor: '#94a3b8', bodyColor: '#e2e8f0', padding: 8,
+          backgroundColor: '#0F172A', borderColor: '#334155', borderWidth: 1,
+          titleColor: '#CBD5E1', bodyColor: '#FFFFFF', padding: 8,
           callbacks: {
             title: items => `Neurone ${items[0].label}`,
             label: item => `${item.raw > 0 ? '+' : ''}${item.raw} → ${item.raw > 0 ? 'PNEUMONIE' : item.raw < 0 ? 'NORMAL' : 'bloqué'}`,
@@ -1295,14 +1481,14 @@ function buildContribChart(contributions) {
         x: {
           grid: { display: false },
           ticks: { display: false },
-          border: { color: '#16163a' },
-          title: { display: true, text: '← NORMAL · 128 neurones triés par contribution · PNEUMONIE →', color: '#3d3d6b', font: { size: 8 } }
+          border: { color: '#CBD5E1' },
+          title: { display: true, text: '← NORMAL · 128 neurones triés par contribution · PNEUMONIE →', color: '#94A3B8', font: { size: 8 } }
         },
         y: {
-          grid: { color: '#111128', lineWidth: 0.5 },
-          ticks: { color: '#2d2d5a', font: { size: 8 }, maxTicksLimit: 5 },
-          border: { color: '#16163a' },
-          title: { display: true, text: 'Contribution au logit', color: '#3d3d6b', font: { size: 8 } }
+          grid: { color: '#E2E8F0', lineWidth: 0.5 },
+          ticks: { color: '#94A3B8', font: { size: 8 }, maxTicksLimit: 5 },
+          border: { color: '#CBD5E1' },
+          title: { display: true, text: 'Contribution au logit', color: '#94A3B8', font: { size: 8 } }
         }
       }
     }
@@ -1410,7 +1596,7 @@ fetch('/test-images').then(r => r.json()).then(images => {
 });
 
 
-const STAGE_IDS = ['stage-input','stage-conv1','stage-conv2','stage-dense','stage-result'];
+const STAGE_IDS = ['card-radios','card-diag','card-origin','card-maps','card-details'];
 function litStage(id) { const el=document.getElementById(id); if(el) el.classList.add('lit'); }
 function resetLit()   { STAGE_IDS.forEach(id=>{const el=document.getElementById(id);if(el)el.classList.remove('lit');}); }
 
@@ -1433,7 +1619,14 @@ function resetResult() {
   document.getElementById('fm2').querySelectorAll('img').forEach(img => img.src = '');
   document.getElementById('dense-count').textContent = 'Top 16 neurones par contribution absolue';
   if (denseChart) { denseChart.data.labels = []; denseChart.data.datasets[0].data = []; denseChart.update('none'); }
+  document.getElementById('res-conf').textContent = '—';
+  document.getElementById('res-conf').style.color = '#6e7681';
+  document.getElementById('res-origin').style.display = 'none';
+  document.getElementById('ro-rows').innerHTML = '';
+  document.getElementById('res-explain').style.display = 'none';
 }
+
+function setMsg(m) { const e = document.getElementById('s-msg'); if (e) e.textContent = m; }
 
 document.getElementById('btn-run').addEventListener('click', () => {
   if (!selectedItem || !selectedItem._data) return;
@@ -1446,23 +1639,68 @@ document.getElementById('btn-run').addEventListener('click', () => {
   socket.emit('run_inference', { path: data.path, label: data.label });
 });
 
-socket.on('inference_result', d => {
+const ORIGIN_COLORS = { 'NORMAL': '#4C9F70', 'VIRUS': '#E8A33D', 'BACTÉRIE': '#D7544C' };
+
+function renderOrigin(d) {
+  const box = document.getElementById('res-origin');
+  const rows = document.getElementById('ro-rows');
+  if (!d.origin_probs || !d.origin_labels) { box.style.display = 'none'; return; }
+  rows.innerHTML = '';
+  const probs = d.origin_probs, labels = d.origin_labels;
+  const maxi = probs.indexOf(Math.max(...probs));
+  labels.forEach((lab, i) => {
+    const p = probs[i], col = ORIGIN_COLORS[lab] || '#2563eb';
+    const row = document.createElement('div');
+    row.className = 'ro-row';
+    row.innerHTML =
+      `<span class="ro-lbl"${i === maxi ? ' style="color:#e2e8f0;font-weight:700"' : ''}>${lab}</span>` +
+      `<span class="ro-bar-bg"><span class="ro-bar" style="background:${col}"></span></span>` +
+      `<span class="ro-pct">${(p * 100).toFixed(0)}%</span>`;
+    rows.appendChild(row);
+    requestAnimationFrame(() => { row.querySelector('.ro-bar').style.width = (p * 100) + '%'; });
+  });
+  box.style.display = 'block';
+}
+
+function renderExplain(pred, conf, known, correct) {
+  const el = document.getElementById('res-explain');
+  let html, bg, color;
+  if (known && correct === false) {
+    bg = '#FFF7ED'; color = '#C2410C';
+    html = conf < 0.65
+      ? '⚠ Erreur avec confiance faible — le réseau a hésité (image ambiguë).'
+      : '⚠ Erreur malgré une confiance élevée — radio atypique ou hors-distribution.';
+  } else if (known && correct === true) {
+    bg = '#F0FDF4'; color = '#15803D';
+    html = '✓ Prédiction correcte.' + (conf < 0.65 ? ' Confiance faible : cas limite.' : '');
+  } else {
+    bg = '#EFF6FF'; color = '#1D4ED8';
+    html = 'Image externe : pas de vrai label pour vérifier. ' + (pred ? 'Pneumonie suspectée.' : 'Aspect normal.');
+  }
+  el.style.background = bg; el.style.color = color; el.innerHTML = html; el.style.display = 'block';
+}
+
+// Rendu commun aux deux sources (image du test set via SocketIO, ou upload via HTTP).
+function renderInferenceResult(d) {
   const dot = document.getElementById('status-dot');
   if (dot) dot.className = 'status-dot done';
-  document.getElementById('s-msg').textContent = 'Analyse terminée.';
   document.getElementById('btn-run').disabled = false;
+
+  // Couleurs sémantiques (lisibles sur fond clair)
+  const PNEU = '#DC2626', NORM = '#15803D', WARN = '#EA580C', MUTE = '#64748B';
 
   // Image d'entrée
   _inputSrc = 'data:image/png;base64,' + d.input_image;
   document.getElementById('res-img').src = _inputSrc;
-  litStage('stage-input');
+  litStage('card-maps');
+  setMsg('Prétraitement → 64×64, niveaux de gris, normalisé [0,1]');
 
   // t=0 : Conv1
   setTimeout(() => {
     document.getElementById('fm1').querySelectorAll('img').forEach((img, i) => {
       if (d.conv1_maps[i]) img.src = 'data:image/png;base64,' + d.conv1_maps[i];
     });
-    litStage('stage-conv1');
+    setMsg('Conv 1 → détection des bords et contrastes locaux');
   }, 0);
 
   // t=450 : Conv2
@@ -1470,54 +1708,111 @@ socket.on('inference_result', d => {
     document.getElementById('fm2').querySelectorAll('img').forEach((img, i) => {
       if (d.conv2_maps[i]) img.src = 'data:image/png;base64,' + d.conv2_maps[i];
     });
-    litStage('stage-conv2');
+    setMsg('Conv 2 → combinaison en structures (opacités, infiltrats)');
   }, 450);
 
-  // t=900 : Contributions
+  // t=900 : Contributions Dense
   setTimeout(() => {
     buildContribChart(d.contributions);
-    litStage('stage-dense');
+    litStage('card-details');
+    setMsg('Dense → pondération de chaque feature vers la décision');
   }, 900);
 
-  // t=1350 : Résultat final
-  setTimeout(() => { litStage('stage-result'); }, 1300);
+  // t=1300 : Résultat final
+  setTimeout(() => { litStage('card-diag'); litStage('card-origin'); }, 1300);
   setTimeout(() => {
-    const p = d.prediction;
-    const pred = p >= 0.5;
-    const correct = pred === (d.true_label === 1);
+    const p = d.prediction, pred = p >= 0.5;
 
     document.getElementById('res-pct').textContent = (p * 100).toFixed(1) + '%';
-    document.getElementById('res-pct').style.color = pred ? '#fca5a5' : '#86efac';
-  
-    document.getElementById('logit-val').textContent = (d.logit !== undefined ? d.logit : (Math.log(p / (1 - p + 1e-7))).toFixed(3)).toString();
-
+    document.getElementById('res-pct').style.color = pred ? PNEU : NORM;
+    document.getElementById('logit-val').textContent =
+      (d.logit !== undefined ? d.logit : Math.log(p / (1 - p + 1e-7)).toFixed(3)).toString();
     document.getElementById('res-bar').style.cssText =
-      `width:${p * 100}%;background:${pred ? '#dc2626' : '#16a34a'}`;
-
+      `width:${p * 100}%;background:${pred ? PNEU : '#16A34A'}`;
     document.getElementById('res-verdict').textContent = pred ? 'PNEUMONIE' : 'NORMAL';
-    document.getElementById('res-verdict').style.color = pred ? '#fca5a5' : '#86efac';
+    document.getElementById('res-verdict').style.color = pred ? PNEU : NORM;
 
-    const trueLabel = d.true_label === 1 ? 'PNEUMONIE' : 'NORMAL';
+    // Confiance
+    const conf = Math.max(p, 1 - p);
+    const lvl = conf >= 0.85 ? ['Élevée', NORM] : conf >= 0.65 ? ['Moyenne', WARN] : ['Faible', PNEU];
+    document.getElementById('res-conf').innerHTML =
+      `Confiance : <b style="color:${lvl[1]}">${lvl[0]}</b> (${(conf * 100).toFixed(0)}%)`;
+
+    // Vrai label / verdict — connus seulement pour les images du test set
+    const known = (d.true_label === 0 || d.true_label === 1);
     const trueLabelEl = document.getElementById('true-label-box');
-    trueLabelEl.textContent = trueLabel;
-    trueLabelEl.style.color = d.true_label === 1 ? '#fca5a5' : '#86efac';
-
     const verdictEl = document.getElementById('verdict-box');
-    if (correct) {
-      verdictEl.textContent = 'Correct';
-      verdictEl.style.color = '#6ee7b7';
+    let correct = null;
+    if (known) {
+      correct = pred === (d.true_label === 1);
+      trueLabelEl.textContent = d.true_label === 1 ? 'PNEUMONIE' : 'NORMAL';
+      trueLabelEl.style.color = d.true_label === 1 ? PNEU : NORM;
+      verdictEl.textContent = correct ? 'Correct' : 'Incorrect';
+      verdictEl.style.color = correct ? NORM : WARN;
     } else {
-      verdictEl.textContent = 'Incorrect';
-      verdictEl.style.color = '#f97316';
+      trueLabelEl.textContent = 'inconnu (upload)';
+      trueLabelEl.style.color = MUTE;
+      verdictEl.textContent = '—';
+      verdictEl.style.color = '#94A3B8';
     }
+
+    renderOrigin(d);
+    renderExplain(pred, conf, known, correct);
+    setMsg('Analyse terminée.');
   }, 1350);
+}
+
+socket.on('inference_result', renderInferenceResult);
+
+// ── Upload d'une radio personnelle (drag & drop ou clic) ──────────────────
+const uploadZone  = document.getElementById('upload-zone');
+const uploadInput = document.getElementById('upload-input');
+uploadZone.addEventListener('click', () => uploadInput.click());
+uploadZone.addEventListener('dragover', e => { e.preventDefault(); uploadZone.classList.add('drag'); });
+uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('drag'));
+uploadZone.addEventListener('drop', e => {
+  e.preventDefault(); uploadZone.classList.remove('drag');
+  if (e.dataTransfer.files[0]) handleUpload(e.dataTransfer.files[0]);
 });
+uploadInput.addEventListener('change', () => { if (uploadInput.files[0]) handleUpload(uploadInput.files[0]); });
+
+function handleUpload(file) {
+  if (!file.type.startsWith('image/')) { setMsg('⚠ Veuillez choisir un fichier image.'); return; }
+  if (selectedItem) { selectedItem.classList.remove('sel'); selectedItem = null; }
+  document.getElementById('btn-run').disabled = true;
+  const dot = document.getElementById('status-dot'); if (dot) dot.className = 'status-dot running';
+  setMsg('Envoi & analyse de votre radio…');
+  resetResult();
+  const fd = new FormData(); fd.append('image', file);
+  fetch('/infer-upload', { method: 'POST', body: fd })
+    .then(r => r.json())
+    .then(d => { if (d.error) throw new Error(d.error); renderInferenceResult(d); })
+    .catch(err => {
+      const dt = document.getElementById('status-dot'); if (dt) dt.className = 'status-dot err';
+      setMsg('⚠ ' + err.message);
+      document.getElementById('btn-run').disabled = false;
+    });
+}
 
 socket.on('inference_error', d => {
   const dot = document.getElementById('status-dot');
   if (dot) dot.className = 'status-dot err';
   document.getElementById('s-msg').textContent = '⚠ ' + d.message;
   document.getElementById('btn-run').disabled = false;
+});
+
+// ── Redessin sur redimensionnement (les canvas adaptent leur résolution) ──
+let _resizeTimer = null;
+window.addEventListener('resize', () => {
+  clearTimeout(_resizeTimer);
+  _resizeTimer = setTimeout(() => {
+    const guideVisible = document.getElementById('guide').style.display !== 'none';
+    if (guideVisible) {
+      if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+      startAnim(cur);
+    }
+    if (denseChart) denseChart.resize();
+  }, 180);
 });
 </script>
 </body>

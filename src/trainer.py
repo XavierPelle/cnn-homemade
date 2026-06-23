@@ -16,6 +16,20 @@ import numpy as np
 from .data_loader import batch_generator
 
 
+def _count_correct(y_pred, y_batch):
+    """
+    Compte les prédictions correctes, que la sortie soit binaire ou multi-classes.
+      - binaire (1 colonne)      : seuil 0.5
+      - multi-classes (≥2 col.)  : argmax prédit == argmax du label one-hot
+    """
+    if y_pred.shape[1] == 1:
+        preds = (y_pred >= 0.5).astype(int)
+        return int(np.sum(preds == y_batch))
+    preds = np.argmax(y_pred, axis=1)
+    truth = np.argmax(y_batch, axis=1)
+    return int(np.sum(preds == truth))
+
+
 class Trainer:
     def __init__(self, model, loss_fn, optimizer):
         self.model = model
@@ -46,8 +60,7 @@ class Trainer:
                 self.optimizer.update(self.model.layers)
 
                 # ── Métriques du batch ────────────────────────────────────
-                preds = (y_pred >= 0.5).astype(int)
-                epoch_correct += np.sum(preds == y_batch)
+                epoch_correct += _count_correct(y_pred, y_batch)
                 epoch_total += len(y_batch)
 
             train_loss = np.mean(epoch_losses)
@@ -76,8 +89,7 @@ class Trainer:
         for X_batch, y_batch in batch_generator(X, y, batch_size):
             y_pred = self.model.forward(X_batch)
             losses.append(self.loss_fn(y_pred, y_batch))
-            preds = (y_pred >= 0.5).astype(int)
-            correct += np.sum(preds == y_batch)
+            correct += _count_correct(y_pred, y_batch)
             total += len(y_batch)
 
         return np.mean(losses), correct / total

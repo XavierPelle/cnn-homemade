@@ -26,31 +26,48 @@ Pour une image 64x64 en entrée :
 """
 
 import numpy as np
-from .layers import Conv2D, MaxPool2D, Flatten, Dense, ReLU, Sigmoid
+from .layers import Conv2D, MaxPool2D, Flatten, Dense, ReLU, Sigmoid, Softmax
 
 
 class CNN:
-    def __init__(self, input_size=64):
+    def __init__(self, input_size=64, n_classes=1, n_filters1=8, n_filters2=16, dense_units=128):
+        """
+        input_size  : côté des images carrées en entrée
+        n_classes   : 1 → binaire (Sigmoid, NORMAL vs PNEUMONIE)
+                      ≥3 → multi-classes (Softmax, ex : NORMAL/VIRUS/BACTÉRIE)
+        n_filters1  : nombre de filtres de la 1re couche conv
+        n_filters2  : nombre de filtres de la 2e couche conv
+        dense_units : neurones de la couche dense cachée
+        Les hyperparamètres d'architecture sont exposés pour le tuning.
+        """
         # Calcul dynamique de la taille après conv+pool
         s = input_size
         s = (s - 2)      # après Conv 3x3
         s = s // 2       # après MaxPool 2x2
         s = (s - 2)      # après Conv 3x3
         s = s // 2       # après MaxPool 2x2
-        flatten_size = s * s * 16
+        flatten_size = s * s * n_filters2
+
+        self.input_size = input_size
+        self.n_classes  = n_classes
+
+        # Couche de sortie : Sigmoid (1 neurone) en binaire, Softmax sinon.
+        if n_classes == 1:
+            output_layer = [Dense(dense_units, 1), Sigmoid()]
+        else:
+            output_layer = [Dense(dense_units, n_classes), Softmax()]
 
         self.layers = [
-            Conv2D(n_filters=8, kernel_size=3, n_channels=1),
+            Conv2D(n_filters=n_filters1, kernel_size=3, n_channels=1),
             ReLU(),
             MaxPool2D(pool_size=2),
-            Conv2D(n_filters=16, kernel_size=3, n_channels=8),
+            Conv2D(n_filters=n_filters2, kernel_size=3, n_channels=n_filters1),
             ReLU(),
             MaxPool2D(pool_size=2),
             Flatten(),
-            Dense(flatten_size, 128),
+            Dense(flatten_size, dense_units),
             ReLU(),
-            Dense(128, 1),
-            Sigmoid(),
+            *output_layer,
         ]
 
     def forward(self, x):
@@ -89,9 +106,14 @@ class CNN:
             grad = layer.backward(grad)
 
     def predict(self, x):
-        """Retourne 1 (PNEUMONIE) ou 0 (NORMAL) selon le seuil 0.5."""
+        """
+        Binaire   : 1 (PNEUMONIE) ou 0 (NORMAL) selon le seuil 0.5.
+        Multi-classes : indice de la classe la plus probable (argmax).
+        """
         probs = self.forward(x)
-        return (probs >= 0.5).astype(int)
+        if self.n_classes == 1:
+            return (probs >= 0.5).astype(int)
+        return np.argmax(probs, axis=1)
 
     def save(self, path):
         """Sauvegarde les poids du modèle."""

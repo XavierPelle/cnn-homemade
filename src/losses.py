@@ -63,3 +63,50 @@ class BinaryCrossEntropy:
             self.pos_weight * y_true / y_pred_c -
             self.neg_weight * (1 - y_true) / (1 - y_pred_c)
         ) / batch_size
+
+
+class CategoricalCrossEntropy:
+    """
+    Cross-entropy catégorielle pour la classification multi-classes
+    (utilisée avec une sortie Softmax).
+
+    Formule (pondérée par classe) :
+      loss = -mean( Σ_c  w_c * y_c * log(ŷ_c) )
+
+    où y est un label "one-hot" (ex : VIRUS → [0, 1, 0]).
+
+    Pondération des classes :
+      Comme en binaire, le dataset est déséquilibré (BACTÉRIE > VIRUS > NORMAL).
+      On peut donner un poids w_c à chaque classe pour rééquilibrer son
+      influence dans la loss. Par défaut, tous les poids valent 1.
+
+    gradient() retourne dL/dŷ. Combiné à Softmax.backward, on retrouve le
+    gradient stable (ŷ - y) / batch.
+    """
+
+    def __init__(self, class_weights=None):
+        # class_weights : tableau (n_classes,) ou None (= poids uniformes).
+        self.class_weights = None if class_weights is None else np.asarray(class_weights, dtype=np.float32)
+
+    def _weights_row(self, n_classes):
+        if self.class_weights is None:
+            return np.ones((1, n_classes), dtype=np.float32)
+        return self.class_weights.reshape(1, -1)
+
+    def __call__(self, y_pred, y_true):
+        """
+        y_pred : (batch, n_classes) — probabilités (sortie Softmax)
+        y_true : (batch, n_classes) — labels one-hot
+        """
+        eps = 1e-8
+        y_pred = np.clip(y_pred, eps, 1.0)
+        w = self._weights_row(y_pred.shape[1])
+        return -np.mean(np.sum(w * y_true * np.log(y_pred), axis=1))
+
+    def gradient(self, y_pred, y_true):
+        """Retourne dL/dŷ ; Softmax.backward applique ensuite le jacobien."""
+        eps = 1e-8
+        y_pred_c = np.clip(y_pred, eps, 1.0)
+        batch_size = y_pred.shape[0]
+        w = self._weights_row(y_pred.shape[1])
+        return -(w * y_true / y_pred_c) / batch_size

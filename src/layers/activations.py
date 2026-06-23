@@ -50,3 +50,38 @@ class Sigmoid(Layer):
     def backward(self, grad_output):
         s = self.output
         return grad_output * s * (1 - s)
+
+
+class Softmax(Layer):
+    """
+    Softmax : généralise la sigmoïde à plusieurs classes.
+      f(z)_i = e^(z_i) / Σ_j e^(z_j)
+
+    Transforme un vecteur de scores (logits) en distribution de probabilités
+    (positives, de somme 1). Utilisé en sortie pour la classification
+    multi-classes :
+      classe 0 → NORMAL, classe 1 → VIRUS, classe 2 → BACTÉRIE.
+
+    Backpropagation :
+      Le jacobien de softmax est J_ij = s_i (δ_ij - s_j).
+      Le produit jacobien-vecteur se calcule efficacement sans construire
+      la matrice complète :
+        dz_i = s_i * ( g_i - Σ_j g_j s_j )
+      où g = grad_output (dL/dŝ).
+
+      Combiné à CategoricalCrossEntropy.gradient (= -y/ŝ / batch), cela
+      redonne le gradient classique et stable (ŝ - y) / batch — exactement
+      comme la paire Sigmoid + BinaryCrossEntropy en binaire.
+    """
+
+    def forward(self, x):
+        # Stabilité numérique : on retranche le max par ligne avant l'exp.
+        shifted = x - np.max(x, axis=1, keepdims=True)
+        exp = np.exp(shifted)
+        self.output = exp / np.sum(exp, axis=1, keepdims=True)
+        return self.output
+
+    def backward(self, grad_output):
+        s = self.output
+        dot = np.sum(grad_output * s, axis=1, keepdims=True)  # Σ_j g_j s_j
+        return s * (grad_output - dot)

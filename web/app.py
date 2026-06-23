@@ -5,7 +5,7 @@ Serveur Flask + SocketIO pour la visualisation en temps réel du CNN.
 import sys, os, threading, base64, io, json, random
 import numpy as np
 from PIL import Image
-from flask import Flask, render_template, jsonify
+from flask import Flask, render_template, jsonify, request
 from flask_socketio import SocketIO
 
 try:
@@ -234,19 +234,95 @@ def serve_xray(label):
 # ── Inférence ─────────────────────────────────────────────────────────────────
 
 _inference_model = None
+_origin_model    = None
+
+ORIGIN_LABELS = ["NORMAL", "VIRUS", "BACTÉRIE"]   # classes 0/1/2 du modèle d'origine
+
+
+def _base_dir():
+    return os.path.dirname(os.path.dirname(__file__))
+
 
 def _load_inference_model():
+    """Modèle binaire 64×64 (NORMAL vs PNEUMONIE)."""
     global _inference_model
     if _inference_model is not None:
         return _inference_model
-    base = os.path.dirname(os.path.dirname(__file__))
-    weights = os.path.join(base, "model_weights.npz")
+    weights = os.path.join(_base_dir(), "model_weights.npz")
     if not os.path.exists(weights):
         return None
     m = CNN(input_size=64)
     m.load(weights)
     _inference_model = m
     return m
+
+
+def _load_origin_model():
+    """Modèle 3 classes 48×48 (NORMAL / VIRUS / BACTÉRIE). Optionnel."""
+    global _origin_model
+    if _origin_model is not None:
+        return _origin_model
+    weights = os.path.join(_base_dir(), "origin_weights.npz")
+    if not os.path.exists(weights):
+        return None
+    m = CNN(input_size=48, n_classes=3, dense_units=64)
+    m.load(weights)
+    _origin_model = m
+    return m
+
+
+def _build_inference_payload(img_gray, true_label=None):
+    """
+    Exécute les deux modèles sur une image PIL en niveaux de gris et construit
+    le payload complet pour l'interface.
+
+    - Modèle binaire (64×64) : feature maps + probabilité de pneumonie + contributions.
+    - Modèle d'origine (48×48) : probabilités des 3 classes (si le modèle existe).
+
+    true_label : 0/1 si connu (images du test set), None pour un upload.
+    Retourne (payload, error_message).
+    """
+    model = _load_inference_model()
+    if model is None:
+        return None, "Modèle binaire non trouvé — lance 'python train.py' d'abord."
+
+    # ── Modèle binaire ───────────────────────────────────────────────────────
+    arr64 = np.array(img_gray.resize((64, 64)), dtype=np.float32) / 255.0
+    x64   = arr64[:, :, np.newaxis][np.newaxis]            # (1, 64, 64, 1)
+
+    acts = model.forward_with_activations(x64)
+    pred = float(acts["output"][0, 0])
+
+    fm1 = acts["after_relu1"][0]
+    fm2 = acts["after_relu2"][0]
+    d1  = acts["after_dense1"][0]
+
+    logit = float(np.log(max(pred, 1e-7) / max(1 - pred, 1e-7)))
+    colorize = arr_to_b64_color if arr_to_b64_color is not None else arr_to_b64
+
+    d2_weights    = model.layers[9].weights.flatten()       # (128,)
+    contributions = (d1 * d2_weights).tolist()              # contribution de chaque neurone au logit
+
+    payload = {
+        "prediction":    round(pred, 4),
+        "logit":         round(logit, 3),
+        "input_image":   arr_to_b64(arr64),
+        "conv1_maps":    [colorize(fm1[:, :, i]) for i in range(8)],
+        "conv2_maps":    [colorize(fm2[:, :, i]) for i in range(8)],
+        "contributions": contributions,
+        "true_label":    true_label,
+    }
+
+    # ── Modèle d'origine (3 classes) ─────────────────────────────────────────
+    origin = _load_origin_model()
+    if origin is not None:
+        arr48 = np.array(img_gray.resize((48, 48)), dtype=np.float32) / 255.0
+        x48   = arr48[:, :, np.newaxis][np.newaxis]
+        probs = origin.forward(x48)[0]                      # (3,)
+        payload["origin_probs"]  = [round(float(p), 4) for p in probs]
+        payload["origin_labels"] = ORIGIN_LABELS
+
+    return payload, None
 
 
 @app.route("/test-images")
@@ -277,43 +353,40 @@ def test_images():
 
 @socketio.on("run_inference")
 def handle_inference(data):
-    """Exécute l'inférence sur l'image choisie et renvoie toutes les activations."""
-    model = _load_inference_model()
-    if model is None:
-        socketio.emit("inference_error",
-                      {"message": "Modèle non trouvé — lance 'python train.py' d'abord."})
+    """Exécute l'inférence sur une image du test set et renvoie toutes les activations."""
+    img_path = os.path.join(_base_dir(), "data", "chest_xray", "test", data["path"])
+    try:
+        img = Image.open(img_path).convert("L")
+    except Exception as e:
+        socketio.emit("inference_error", {"message": f"Image illisible : {e}"})
         return
 
-    base     = os.path.dirname(os.path.dirname(__file__))
-    img_path = os.path.join(base, "data", "chest_xray", "test", data["path"])
+    payload, err = _build_inference_payload(img, true_label=data.get("label"))
+    if err:
+        socketio.emit("inference_error", {"message": err})
+        return
+    socketio.emit("inference_result", payload)
 
-    img = Image.open(img_path).convert("L").resize((64, 64))
-    arr = np.array(img, dtype=np.float32) / 255.0
-    x   = arr[:, :, np.newaxis][np.newaxis]          # (1, 64, 64, 1)
 
-    acts = model.forward_with_activations(x)
-    pred = float(acts["output"][0, 0])
+@app.route("/infer-upload", methods=["POST"])
+def infer_upload():
+    """
+    Inférence sur une radiographie envoyée par l'utilisateur (drag & drop).
+    Retourne le même payload que l'événement SocketIO inference_result, en JSON.
+    Le vrai label est inconnu → true_label = None.
+    """
+    file = request.files.get("image")
+    if file is None:
+        return jsonify({"error": "Aucune image reçue."}), 400
+    try:
+        img = Image.open(file.stream).convert("L")
+    except Exception as e:
+        return jsonify({"error": f"Fichier image invalide : {e}"}), 400
 
-    fm1 = acts["after_relu1"][0]
-    fm2 = acts["after_relu2"][0]
-    d1  = acts["after_dense1"][0]
-    d1n = (d1 / (np.max(np.abs(d1)) + 1e-8)).tolist()
-
-    logit = float(np.log(max(pred, 1e-7) / max(1 - pred, 1e-7)))
-    colorize = arr_to_b64_color if arr_to_b64_color is not None else arr_to_b64
-
-    d2_weights = model.layers[9].weights.flatten()          # (128,)
-    contributions = (d1 * d2_weights).tolist()              # contribution de chaque neurone au logit
-
-    socketio.emit("inference_result", {
-        "prediction":    round(pred, 4),
-        "logit":         round(logit, 3),
-        "input_image":   arr_to_b64(arr),
-        "conv1_maps":    [colorize(fm1[:, :, i]) for i in range(8)],
-        "conv2_maps":    [colorize(fm2[:, :, i]) for i in range(8)],
-        "contributions": contributions,
-        "true_label":    data["label"],
-    })
+    payload, err = _build_inference_payload(img, true_label=None)
+    if err:
+        return jsonify({"error": err}), 500
+    return jsonify(payload)
 
 
 @socketio.on("start_training")
